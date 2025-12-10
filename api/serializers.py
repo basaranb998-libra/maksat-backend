@@ -58,3 +58,31 @@ class VenueSearchSerializer(serializers.Serializer):
     query = serializers.CharField(required=True)
     location = serializers.CharField(required=False, default="İzmir, Turkey")
     radius = serializers.IntegerField(required=False, default=5000)
+
+
+class CategorySerializer(serializers.Serializer):
+    """Kategori bilgisi"""
+    id = serializers.CharField()
+    name = serializers.CharField()
+
+
+class LocationSerializer(serializers.Serializer):
+    """Konum bilgisi"""
+    city = serializers.CharField()
+    districts = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+
+
+class FiltersSerializer(serializers.Serializer):
+    """Filtre bilgisi"""
+    groupSize = serializers.CharField(required=False)
+    budget = serializers.CharField(required=False)
+    vibes = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    amenities = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+
+
+class VenueGenerateSerializer(serializers.Serializer):
+    """Venue generate endpoint için input serializer"""
+    category = CategorySerializer(required=True)
+    location = LocationSerializer(required=True)
+    filters = FiltersSerializer(required=False, default=dict)
+    tripDuration = serializers.IntegerField(required=False)

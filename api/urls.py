@@ -12,10 +12,11 @@ urlpatterns = [
     path('auth/register/', views.register, name='register'),
     path('auth/login/', views.login, name='login'),
     path('auth/logout/', views.logout, name='logout'),
-    
-    # Venue search
+
+    # Venue endpoints
+    path('venues/generate/', views.generate_venues, name='generate-venues'),
     path('venues/search/', views.search_venues, name='search-venues'),
-    
+
     # Router URLs
     path('', include(router.urls)),
 ]
