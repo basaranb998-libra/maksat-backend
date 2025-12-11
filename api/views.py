@@ -23,7 +23,7 @@ def get_gmaps_client():
 def get_genai_model():
     if settings.GEMINI_API_KEY:
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        return genai.GenerativeModel('gemini-1.5-flash')
+        return genai.GenerativeModel('gemini-1.5-flash-latest')
     return None
 
 def generate_mock_venues(category, location, filters):
@@ -164,8 +164,19 @@ def generate_venues(request):
     trip_duration = data.get('tripDuration')
 
     try:
+        # Kategori bazlı query mapping
+        category_query_map = {
+            'İlk Buluşma': 'cafe coffee shop romantic restaurant',
+            'İş Toplantısı': 'business meeting cafe hotel conference',
+            'Arkadaşlarla Takılma': 'bar pub restaurant hangout spot',
+            'Aile Yemeği': 'family restaurant casual dining',
+            'Romantik Akşam': 'romantic restaurant fine dining',
+            'Tatil': 'hotel resort vacation accommodation',
+            'Çalışma': 'coworking space cafe library quiet study',
+        }
+
         # Kategori ve filtrelere göre arama sorgusu oluştur
-        search_query = f"{category['name']}"
+        search_query = category_query_map.get(category['name'], category['name'])
 
         # Filtrelere göre sorguyu genişlet
         if filters.get('vibes'):
@@ -175,6 +186,9 @@ def generate_venues(request):
         city = location['city']
         districts = location.get('districts', [])
         search_location = f"{districts[0]}, {city}" if districts else city
+        import sys
+        print(f"DEBUG - Search Location: {search_location}", file=sys.stderr, flush=True)
+        print(f"DEBUG - Full location data: {location}", file=sys.stderr, flush=True)
 
         # Google Places API'den mekan ara
         gmaps = get_gmaps_client()
@@ -194,10 +208,12 @@ def generate_venues(request):
                     "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.photos,places.priceLevel,places.types,places.location"
                 }
                 payload = {
-                    "textQuery": f"{search_query} {search_location}",
+                    "textQuery": f"{search_query} in {search_location}, Turkey",
                     "languageCode": "tr",
-                    "maxResultCount": 15
+                    "maxResultCount": 20  # Gemini filtreleyeceği için daha fazla sonuç iste
                 }
+
+                print(f"DEBUG - Google Places API Query: {payload['textQuery']}", file=sys.stderr, flush=True)
 
                 response = requests.post(url, json=payload, headers=headers)
 
@@ -205,7 +221,7 @@ def generate_venues(request):
                     places_data = response.json()
                     places_result = {'results': places_data.get('places', [])}
                 else:
-                    print(f"Places API hatası: {response.status_code} - {response.text}")
+                    print(f"Places API hatası: {response.status_code} - {response.text}", file=sys.stderr, flush=True)
                     use_mock_data = True
 
             except Exception as e:
@@ -253,17 +269,51 @@ def generate_venues(request):
                 if budget_filter in budget_map and price_level not in budget_map[budget_filter]:
                     continue
 
-            # Gemini ile detaylı analiz
+            # Gemini ile detaylı analiz ve kategori uygunluk kontrolü
             try:
+                # Kullanıcı vibe filterlerini hazırla
+                user_preferences = []
+                if filters.get('groupSize'):
+                    user_preferences.append(f"Grup Boyutu: {filters['groupSize']}")
+                if filters.get('budget'):
+                    user_preferences.append(f"Bütçe: {filters['budget']}")
+                if filters.get('vibes'):
+                    user_preferences.append(f"Vibe'lar: {', '.join(filters['vibes'])}")
+                if filters.get('amenities'):
+                    user_preferences.append(f"İmkanlar: {', '.join(filters['amenities'])}")
+
+                preferences_text = "\n".join(user_preferences) if user_preferences else "Belirtilmemiş"
+
                 analysis_prompt = f"""
                 Mekan: {place_name}
-                Kategori: {category['name']}
+                İstenen Kategori: {category['name']}
                 Adres: {place_address}
-                Tip: {', '.join(place_types[:3])}
+                Mekan Tipleri: {', '.join(place_types[:3])}
                 Rating: {place_rating}
+                Fiyat Seviyesi: {price_range}
 
-                Bu mekanı analiz ederek aşağıdaki bilgileri JSON formatında döndür:
+                KULLANICI TERCİHLERİ:
+                {preferences_text}
+
+                Bu mekanı "{category['name']}" kategorisi ve kullanıcı tercihleri açısından değerlendir:
+
+                KATEGORİ UYGUNLUĞU:
+                - "İlk Buluşma" için: cafe, restaurant, coffee shop UYGUN; spa, gym, hotel UYGUN DEĞİL
+                - "Arkadaşlarla Takılma" için: bar, pub, restaurant UYGUN; bank, hospital UYGUN DEĞİL
+                - "İş Toplantısı" için: cafe, restaurant, hotel meeting room UYGUN; nightclub, gym UYGUN DEĞİL
+                - "Tatil" için: hotel, resort, tourist attraction UYGUN; cafe, office UYGUN DEĞİL
+
+                KULLANICI TERCİHLERİ KONTROLÜ:
+                - Grup boyutu ile mekanın kapasitesi uyumlu mu?
+                - Bütçe ile fiyat seviyesi ({price_range}) uyumlu mu?
+                - İstenen vibe'lar (örn: #Sakin, #Canlı, #Romantik) mekanın atmosferi ile uyumlu mu?
+                - İstenen imkanlar (WiFi, Otopark, vb.) mekanda var mı?
+
+                Eğer mekan kategoriye VEYA kullanıcı tercihlerine UYGUN DEĞİLSE, "isRelevant": false döndür.
+                Eğer UYGUNSA, mekan detaylarını analiz et ve matchScore'u kullanıcı tercihlerine göre hesapla (0-100):
+
                 {{
+                    "isRelevant": true veya false,
                     "description": "Mekan hakkında 2-3 cümlelik açıklama (Türkçe)",
                     "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
                     "noiseLevel": 40,
@@ -275,7 +325,7 @@ def generate_venues(request):
                     }}
                 }}
 
-                Sadece JSON döndür, başka açıklama ekleme.
+                SADECE JSON döndür, başka açıklama ekleme.
                 """
 
                 model = get_genai_model()
@@ -291,6 +341,11 @@ def generate_venues(request):
                     response_text = response_text.split('```')[1].split('```')[0].strip()
 
                 ai_data = json.loads(response_text)
+
+                # Kategoriye uygun değilse skip et
+                if not ai_data.get('isRelevant', True):
+                    print(f"DEBUG - Skipping irrelevant venue: {place_name}", file=sys.stderr, flush=True)
+                    continue
 
                 # Venue objesi oluştur
                 venue = {

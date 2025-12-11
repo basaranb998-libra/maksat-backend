@@ -64,6 +64,8 @@ class CategorySerializer(serializers.Serializer):
     """Kategori bilgisi"""
     id = serializers.CharField()
     name = serializers.CharField()
+    icon = serializers.CharField(required=False)
+    description = serializers.CharField(required=False)
 
 
 class LocationSerializer(serializers.Serializer):
