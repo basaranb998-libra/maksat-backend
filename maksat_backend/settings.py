@@ -118,6 +118,7 @@ CORS_ALLOW_ALL_ORIGINS = DEBUG  # Development only
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # Vite default port
     "http://localhost:3000",
+    "http://localhost:3001",  # Next.js port
 ]
 
 if not DEBUG:
