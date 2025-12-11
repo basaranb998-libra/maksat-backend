@@ -366,6 +366,7 @@ def generate_venues(request):
 
 
 @api_view(['POST'])
+@permission_classes([permissions.AllowAny])
 def search_venues(request):
     """Venue arama endpoint'i - Google Places + Gemini entegrasyonu"""
     serializer = VenueSearchSerializer(data=request.data)
