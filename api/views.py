@@ -26,6 +26,110 @@ def get_genai_model():
         return genai.GenerativeModel('gemini-1.5-flash-latest')
     return None
 
+def generate_vacation_experiences(location, trip_duration, filters):
+    """Tatil kategorisi için deneyim odaklı öneri sistemi"""
+    import json
+    import random
+
+    city = location['city']
+    districts = location.get('districts', [])
+    location_query = f"{districts[0]}, {city}" if districts else city
+    duration = trip_duration if trip_duration else 3  # Varsayılan 3 gün
+
+    # Gemini AI ile deneyim bazlı tatil planı oluştur
+    model = get_genai_model()
+    if not model:
+        return Response(
+            {'error': 'Gemini API key eksik'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+    try:
+        # Yeni deneyim odaklı prompt
+        experience_prompt = f"""
+Sen o şehri avucunun içi gibi bilen, cool ve deneyim odaklı bir 'Lokal Rehber'sin.
+Görevin: "{location_query}" için {duration} günlük, NOKTA ATIŞI ve AKSİYON ODAKLI bir liste hazırlamak.
+
+## STRATEJİ: "Sadece Mekan Değil, Deneyim Öner"
+Kullanıcıya sadece "Louvre Müzesi" deme. "Louvre'da Mona Lisa'yı gör" veya "Tuileries Bahçesinde yürüyüş yap" de.
+
+## GÖREVLER
+1. **Google Search Kullan**: "{location_query} top things to do", "{location_query} best local food" aramaları yap.
+2. **Rota Planla**: Mekanları birbirine yakınlığına göre günlere ayır.
+3. **Çeşitlilik**: Landmark, Yeme/İçme, Aktivite karışık olsun.
+4. **Google Maps Verisi**: Gerçek mekan isimleri, adresleri ve detayları kullan.
+
+## ÇIKTI FORMATI (JSON ARRAY)
+Her deneyim için şu yapıyı kullan:
+
+[
+  {{
+    "id": "exp_1",
+    "name": "Deneyimin adı (Örn: Eyfel Kulesi'nde gün batımı izle)",
+    "description": "2-3 cümlelik detaylı açıklama. Ne yapılacak, neden özel?",
+    "imageUrl": "https://images.unsplash.com/photo-...",
+    "category": "Tatil",
+    "vibeTags": ["#Romantik", "#Manzara", "#İkonik"],
+    "address": "Gerçek mekan adresi",
+    "priceRange": "$" veya "$$" veya "$$$" veya "$$$$",
+    "googleRating": 4.5,
+    "noiseLevel": 30-80 arası sayı,
+    "matchScore": 75-95 arası sayı,
+    "itineraryDay": 1,
+    "metrics": {{
+      "ambiance": 85,
+      "accessibility": 90,
+      "popularity": 95
+    }}
+  }}
+]
+
+## KURALLAR
+- Her gün için 3-4 deneyim öner
+- Sabah kahvaltısı/brunch, öğlen aktivite, akşam yemek/bar şeklinde dengele
+- Mekanları birbirine yakın seç (aynı gün için)
+- Unsplash'ten gerçek fotoğraf URL'leri kullan (şehir ismine göre)
+- İsimlendirme: "X Müzesi'nde Y sergisini gör", "Z Cafe'de kahve iç" formatında
+- Toplam {duration * 3} ile {duration * 4} arası deneyim döndür
+
+SADECE JSON ARRAY döndür, başka açıklama ekleme.
+"""
+
+        response = model.generate_content(experience_prompt)
+        response_text = response.text.strip()
+
+        # JSON parse et
+        if '```json' in response_text:
+            response_text = response_text.split('```json')[1].split('```')[0].strip()
+        elif '```' in response_text:
+            response_text = response_text.split('```')[1].split('```')[0].strip()
+
+        experiences = json.loads(response_text)
+
+        # Validate ve düzenle
+        for exp in experiences:
+            # ID yoksa ekle
+            if 'id' not in exp:
+                exp['id'] = f"exp_{random.randint(1000, 9999)}"
+            # Category zorla
+            exp['category'] = 'Tatil'
+            # ItineraryDay yoksa hesapla
+            if 'itineraryDay' not in exp:
+                exp['itineraryDay'] = 1
+
+        return Response(experiences, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        import sys
+        print(f"❌ Vacation experience generation error: {e}", file=sys.stderr, flush=True)
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
+        return Response(
+            {'error': f'Tatil deneyimi oluşturulurken hata: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 def generate_mock_venues(category, location, filters):
     """Mock venue data generator"""
     import random
@@ -164,14 +268,18 @@ def generate_venues(request):
     trip_duration = data.get('tripDuration')
 
     try:
-        # Kategori bazlı query mapping
+        # Tatil kategorisi için özel işlem
+        if category['name'] == 'Tatil':
+            # Tatil kategorisi için deneyim bazlı öneri sistemi
+            return generate_vacation_experiences(location, trip_duration, filters)
+
+        # Kategori bazlı query mapping (Tatil hariç)
         category_query_map = {
             'İlk Buluşma': 'cafe coffee shop romantic restaurant',
             'İş Toplantısı': 'business meeting cafe hotel conference',
             'Arkadaşlarla Takılma': 'bar pub restaurant hangout spot',
             'Aile Yemeği': 'family restaurant casual dining',
             'Romantik Akşam': 'romantic restaurant fine dining',
-            'Tatil': 'hotel resort vacation accommodation',
             'Çalışma': 'coworking space cafe library quiet study',
         }
 
