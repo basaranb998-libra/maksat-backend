@@ -23,8 +23,7 @@ def get_gmaps_client():
 def get_genai_model():
     if settings.GEMINI_API_KEY:
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        # Gemini 2.5 Flash model - cost-effective option
-        return genai.GenerativeModel('gemini-2.5-flash')
+        return genai.GenerativeModel('gemini-1.5-flash-latest')
     return None
 
 def generate_vacation_experiences(location, trip_duration, filters):
@@ -46,66 +45,54 @@ def generate_vacation_experiences(location, trip_duration, filters):
         )
 
     try:
-        # Yeni deneyim odaklı prompt - Gemini kendisi araştırsın
+        # Yeni deneyim odaklı prompt
         experience_prompt = f"""
-Sen "{location_query}" şehrini avucunun içi gibi bilen, cool ve deneyim odaklı bir 'Lokal Rehber'sin.
+Sen o şehri avucunun içi gibi bilen, cool ve deneyim odaklı bir 'Lokal Rehber'sin.
+Görevin: "{location_query}" için {duration} günlük, NOKTA ATIŞI ve AKSİYON ODAKLI bir liste hazırlamak.
 
-🎯 GÖREV: {duration} günlük, NOKTA ATIŞI deneyim listesi hazırla.
+## STRATEJİ: "Sadece Mekan Değil, Deneyim Öner"
+Kullanıcıya sadece "Louvre Müzesi" deme. "Louvre'da Mona Lisa'yı gör" veya "Tuileries Bahçesinde yürüyüş yap" de.
 
-## ÖNEMLİ: "Sadece Mekan Değil, DENEYİM Öner"
-❌ Kötü: "Louvre Müzesi"
-✅ İyi: "Louvre'da Mona Lisa'yı gör ve selfie çek"
-✅ İyi: "Trocadéro Bahçesi'nden Eyfel Kulesi manzarasıyla kahvaltı"
-
-## NASIL YAPACAKSIN?
-1. Kendi bilgin ve verilerinle "{location_query}" hakkında düşün:
-   - En ünlü 3-5 landmark nedir?
-   - Yerel halkın gittiği en iyi yemek mekanları neresi?
-   - Turistik olmayan gizli yerler var mı?
-   - Hangi mahalleler birbirine yakın?
-
-2. Günlük Plan Yap:
-   - SABAH (09:00-12:00): Kahvaltı + Aktivite/Müze
-   - ÖĞLEN (12:00-15:00): Öğle yemeği + Gezinti
-   - AKŞAM (18:00-22:00): Akşam yemeği/Bar/Gece hayatı
-   - Her gün FARKLI bölgelerde olsun ama aynı gün içinde yakın yerler
-
-3. Deneyim İsimlendirme:
-   Format: "[Mekan]'da/de [AKSİYON]"
-   Örnekler:
-   - "Galata Kulesi'nde gün batımı izle"
-   - "Karaköy Lokantası'nda döner ye"
-   - "Ulus Parkı'nda piknik yap"
-   - "Konyaaltı Plajı'nda denize gir"
+## GÖREVLER
+1. **Google Search Kullan**: "{location_query} top things to do", "{location_query} best local food" aramaları yap.
+2. **Rota Planla**: Mekanları birbirine yakınlığına göre günlere ayır.
+3. **Çeşitlilik**: Landmark, Yeme/İçme, Aktivite karışık olsun.
+4. **Google Maps Verisi**: Gerçek mekan isimleri, adresleri ve detayları kullan.
 
 ## ÇIKTI FORMATI (JSON ARRAY)
+Her deneyim için şu yapıyı kullan:
+
 [
   {{
     "id": "exp_1",
-    "name": "[Mekan İsmi]'nda/de [Ne Yapılacak]",
-    "description": "2-3 cümle: Neden gidilmeli? Ne özel?",
-    "imageUrl": "https://images.unsplash.com/photo-[şehir-ile-ilgili-gerçek-unsplash-ID]",
+    "name": "Deneyimin adı (Örn: Eyfel Kulesi'nde gün batımı izle)",
+    "description": "2-3 cümlelik detaylı açıklama. Ne yapılacak, neden özel?",
+    "imageUrl": "https://images.unsplash.com/photo-...",
     "category": "Tatil",
-    "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
-    "address": "Tam adres, {location_query}",
-    "priceRange": "$$",
+    "vibeTags": ["#Romantik", "#Manzara", "#İkonik"],
+    "address": "Gerçek mekan adresi",
+    "priceRange": "$" veya "$$" veya "$$$" veya "$$$$",
     "googleRating": 4.5,
-    "noiseLevel": 40,
-    "matchScore": 85,
+    "noiseLevel": 30-80 arası sayı,
+    "matchScore": 75-95 arası sayı,
     "itineraryDay": 1,
-    "metrics": {{"ambiance": 85, "accessibility": 90, "popularity": 80}}
+    "metrics": {{
+      "ambiance": 85,
+      "accessibility": 90,
+      "popularity": 95
+    }}
   }}
 ]
 
-## KISITLAMALAR
-✅ {duration * 3} ile {duration * 4} ARASI deneyim döndür (her gün 3-4 deneyim)
-✅ Her gün SABAH, ÖĞLEN, AKŞAM dengesi olsun
-✅ Aynı gün içindeki yerler birbirine YAKIN olsun (max 5-10km)
-✅ Gerçek mekan isimleri kullan
-✅ imageUrl için Unsplash'ten {location_query} ile ilgili gerçek fotoğraf URL'leri bul
-✅ SADECE JSON döndür, başka hiçbir açıklama ekleme
+## KURALLAR
+- Her gün için 3-4 deneyim öner
+- Sabah kahvaltısı/brunch, öğlen aktivite, akşam yemek/bar şeklinde dengele
+- Mekanları birbirine yakın seç (aynı gün için)
+- Unsplash'ten gerçek fotoğraf URL'leri kullan (şehir ismine göre)
+- İsimlendirme: "X Müzesi'nde Y sergisini gör", "Z Cafe'de kahve iç" formatında
+- Toplam {duration * 3} ile {duration * 4} arası deneyim döndür
 
-Başla!
+SADECE JSON ARRAY döndür, başka açıklama ekleme.
 """
 
         response = model.generate_content(experience_prompt)
@@ -286,51 +273,22 @@ def generate_venues(request):
             # Tatil kategorisi için deneyim bazlı öneri sistemi
             return generate_vacation_experiences(location, trip_duration, filters)
 
-        # DİNAMİK GOOGLE PLACES SORGUSU - Kategori + Vibe Kombinasyonu
-        # Kullanıcının vibe ve kategori seçimlerine göre HASSAS sorgu oluştur
-
-        category_name = category['name']
-        vibes = filters.get('vibes', [])
-        alcohol_pref = filters.get('alcohol', '')
-        amenities = filters.get('amenities', [])
-
-        # Temel kategori sorgusu
-        base_queries = {
-            'İlk Buluşma': 'cafe restaurant coffee shop',
-            'İş Toplantısı': 'business cafe hotel lounge',
-            'Arkadaşlarla Takılma': 'bar pub restaurant lounge',
-            'Aile Yemeği': 'family restaurant',
+        # Kategori bazlı query mapping (Tatil hariç)
+        category_query_map = {
+            'İlk Buluşma': 'cafe coffee shop romantic restaurant',
+            'İş Toplantısı': 'business meeting cafe hotel conference',
+            'Arkadaşlarla Takılma': 'bar pub restaurant hangout spot',
+            'Aile Yemeği': 'family restaurant casual dining',
             'Romantik Akşam': 'romantic restaurant fine dining',
-            'Çalışma': 'cafe coworking library',
+            'Çalışma': 'coworking space cafe library quiet study',
         }
 
-        search_query = base_queries.get(category_name, category_name)
+        # Kategori ve filtrelere göre arama sorgusu oluştur
+        search_query = category_query_map.get(category['name'], category['name'])
 
-        # ALKOL TERCİHİNE GÖRE SORGUYU GÜÇLÜ ŞEKİLDE DEĞİŞTİR
-        if alcohol_pref == 'Alcoholic':
-            # Alkollü mekan isteniyorsa bar/pub önceliklendir
-            if category_name == 'İlk Buluşma':
-                search_query = 'wine bar cocktail bar pub restaurant bar'  # Cafe/coffee shop KALDIR
-            elif category_name == 'Arkadaşlarla Takılma':
-                search_query = 'bar pub cocktail lounge nightlife'
-            elif category_name == 'Romantik Akşam':
-                search_query = 'wine bar romantic restaurant cocktail bar'
-        elif alcohol_pref == 'Non-Alcoholic':
-            # Alkolsüz mekan isteniyorsa bar/pub'ı KALDIR
-            if category_name == 'İlk Buluşma':
-                search_query = 'cafe coffee shop tea house'
-            elif category_name == 'Arkadaşlarla Takılma':
-                search_query = 'cafe restaurant hangout'
-
-        # VİBE'LARA GÖRE SORGUYU GENİŞLET
-        if '#Canlı' in vibes or '#Hareketli' in vibes:
-            search_query += ' live music nightlife entertainment'
-        elif '#Sakin' in vibes or '#Huzurlu' in vibes:
-            search_query += ' quiet peaceful calm'
-
-        # AMENITY'LERE GÖRE SORGUYU GENİŞLET
-        if 'Açık Hava' in amenities:
-            search_query += ' outdoor terrace garden rooftop'
+        # Filtrelere göre sorguyu genişlet
+        if filters.get('vibes'):
+            search_query += f" {' '.join(filters['vibes'])}"
 
         # Lokasyon oluştur
         city = location['city']
@@ -355,7 +313,7 @@ def generate_venues(request):
                 headers = {
                     "Content-Type": "application/json",
                     "X-Goog-Api-Key": settings.GOOGLE_MAPS_API_KEY,
-                    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.photos,places.priceLevel,places.types,places.location,places.websiteUri,places.internationalPhoneNumber,places.regularOpeningHours,places.userRatingCount,places.reviews"
+                    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.photos,places.priceLevel,places.types,places.location"
                 }
                 payload = {
                     "textQuery": f"{search_query} in {search_location}, Turkey",
@@ -383,33 +341,14 @@ def generate_venues(request):
             mock_venues = generate_mock_venues(category, location, filters)
             return Response(mock_venues, status=status.HTTP_200_OK)
 
-        # BATCH PROCESSING - Tüm mekanları tek seferde Gemini'ye gönder
-        places_list = places_result.get('results', [])[:15]
-
-        # Önce tüm mekan bilgilerini topla
-        places_data = []
-        for idx, place in enumerate(places_list):
+        venues = []
+        for idx, place in enumerate(places_result.get('results', [])[:15]):
             # Yeni API formatı
             place_id = place.get('id', f"place_{idx}")
             place_name = place.get('displayName', {}).get('text', '')
             place_address = place.get('formattedAddress', '')
             place_rating = place.get('rating', 0)
             place_types = place.get('types', [])
-
-            # Google Places'ten gelen ek bilgiler
-            place_website = place.get('websiteUri', '')
-            place_phone = place.get('internationalPhoneNumber', '')
-            place_review_count = place.get('userRatingCount', 0)
-
-            # Çalışma saatleri
-            place_hours = ''
-            opening_hours = place.get('regularOpeningHours', {})
-            if opening_hours and 'weekdayDescriptions' in opening_hours:
-                # İlk günü al (genellikle Pazartesi)
-                place_hours = opening_hours['weekdayDescriptions'][0] if opening_hours['weekdayDescriptions'] else ''
-                # Sadece saatleri al (örn: "Pazartesi: 09:00 - 22:00" -> "09:00 - 22:00")
-                if ':' in place_hours:
-                    place_hours = place_hours.split(':', 1)[1].strip()
 
             # Fotoğraf URL'si (yeni API formatı)
             photo_url = None
@@ -438,392 +377,64 @@ def generate_venues(request):
                 if budget_filter in budget_map and price_level not in budget_map[budget_filter]:
                     continue
 
-            # Mekan bilgilerini listeye ekle
-            places_data.append({
-                'idx': idx,
-                'id': place_id,
-                'name': place_name,
-                'address': place_address,
-                'rating': place_rating,
-                'review_count': place_review_count,
-                'types': place_types,
-                'price_range': price_range,
-                'photo_url': photo_url,
-                'website': place_website,
-                'phone': place_phone,
-                'hours': place_hours
-            })
+            # Gemini ile detaylı analiz ve kategori uygunluk kontrolü
+            try:
+                # Kullanıcı vibe filterlerini hazırla
+                user_preferences = []
+                if filters.get('groupSize'):
+                    user_preferences.append(f"Grup Boyutu: {filters['groupSize']}")
+                if filters.get('budget'):
+                    user_preferences.append(f"Bütçe: {filters['budget']}")
+                if filters.get('vibes'):
+                    user_preferences.append(f"Vibe'lar: {', '.join(filters['vibes'])}")
+                if filters.get('amenities'):
+                    user_preferences.append(f"İmkanlar: {', '.join(filters['amenities'])}")
 
-        # Filtreleri hazırla (tek sefer)
-        group_size = filters.get('groupSize', '')
-        if group_size == 'Solo':
-            group_logic = "Tek kişilik oturma düzenleri, sessiz ortam."
-        elif group_size == 'Couple':
-            group_logic = "İkili masalar, romantik atmosfer."
-        elif group_size == 'Small Group':
-            group_logic = "4-6 kişilik masalar."
-        elif group_size == 'Big Group':
-            group_logic = "Geniş masalar, grup rezervasyonu."
-        else:
-            group_logic = "Belirtilmemiş."
+                preferences_text = "\n".join(user_preferences) if user_preferences else "Belirtilmemiş"
 
-        amenities = filters.get('amenities', [])
-        env_logic = "Açık hava/teras tercihi VAR" if 'Açık Hava' in amenities else "Tercihi yok"
+                analysis_prompt = f"""
+                Mekan: {place_name}
+                İstenen Kategori: {category['name']}
+                Adres: {place_address}
+                Mekan Tipleri: {', '.join(place_types[:3])}
+                Rating: {place_rating}
+                Fiyat Seviyesi: {price_range}
 
-        vibes = filters.get('vibes', [])
-        if '#Canlı' in vibes or '#Hareketli' in vibes:
-            music_logic = "Canlı müzik, hareketli atmosfer BEKLENİYOR."
-        elif '#Sakin' in vibes or '#Huzurlu' in vibes:
-            music_logic = "Sakin ortam BEKLENİYOR."
-        else:
-            music_logic = "Belirtilmemiş."
+                KULLANICI TERCİHLERİ:
+                {preferences_text}
 
-        alcohol_pref = filters.get('alcohol', '')
-        category_name = category['name']
-        if alcohol_pref == 'Alcoholic':
-            alcohol_logic = "ALKOL SERVİSİ ZORUNLU! Cafe/kahveci ASLA ÖNERME."
-        elif alcohol_pref == 'Non-Alcoholic':
-            alcohol_logic = "Alkolsüz mekan tercih ediliyor."
-        else:
-            alcohol_logic = "Belirtilmemiş."
+                Bu mekanı "{category['name']}" kategorisi ve kullanıcı tercihleri açısından değerlendir:
 
-        # BATCH GEMINI ÇAĞRISI - Tüm mekanları tek seferde analiz et
-        try:
-            # Mekan listesini hazırla
-            venues_list_str = ""
-            for p in places_data:
-                venues_list_str += f"\n{p['idx']+1}. {p['name']} | Types: {', '.join(p['types'][:5])} | Rating: {p['rating']}/5 ({p['review_count']} yorum) | Fiyat: {p['price_range']}"
+                KATEGORİ UYGUNLUĞU:
+                - "İlk Buluşma" için: cafe, restaurant, coffee shop UYGUN; spa, gym, hotel UYGUN DEĞİL
+                - "Arkadaşlarla Takılma" için: bar, pub, restaurant UYGUN; bank, hospital UYGUN DEĞİL
+                - "İş Toplantısı" için: cafe, restaurant, hotel meeting room UYGUN; nightclub, gym UYGUN DEĞİL
+                - "Tatil" için: hotel, resort, tourist attraction UYGUN; cafe, office UYGUN DEĞİL
 
-            # Kısaltılmış batch prompt
-            batch_prompt = f"""Sen mekan vibe analisti asistanısın. Aşağıdaki {len(places_data)} mekanı analiz et.
+                KULLANICI TERCİHLERİ KONTROLÜ:
+                - Grup boyutu ile mekanın kapasitesi uyumlu mu?
+                - Bütçe ile fiyat seviyesi ({price_range}) uyumlu mu?
+                - İstenen vibe'lar (örn: #Sakin, #Canlı, #Romantik) mekanın atmosferi ile uyumlu mu?
+                - İstenen imkanlar (WiFi, Otopark, vb.) mekanda var mı?
 
-KULLANICI TERCİHLERİ:
-- Kategori: {category_name}
-- Alkol: {alcohol_logic}
-- Müzik: {music_logic}
-- Grup: {group_logic}
+                Eğer mekan kategoriye VEYA kullanıcı tercihlerine UYGUN DEĞİLSE, "isRelevant": false döndür.
+                Eğer UYGUNSA, mekan detaylarını analiz et ve matchScore'u kullanıcı tercihlerine göre hesapla (0-100):
 
-KURALLAR:
-1. Alkol "ZORUNLU" ise → Sadece bar/pub/wine_bar UYGUN, cafe/coffee_shop UYGUN DEĞİL
-2. "Alkolsüz" ise → Bar/pub UYGUN DEĞİL
-3. "Canlı müzik BEKLENİYOR" ise → Sessiz cafe UYGUN DEĞİL
-4. Google Types listesine DİKKAT ET
+                {{
+                    "isRelevant": true veya false,
+                    "description": "Mekan hakkında 2-3 cümlelik açıklama (Türkçe)",
+                    "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
+                    "noiseLevel": 40,
+                    "matchScore": 85,
+                    "metrics": {{
+                        "ambiance": 85,
+                        "accessibility": 90,
+                        "popularity": 80
+                    }}
+                }}
 
-MEKANLAR:{venues_list_str}
-
-ÇIKTI: JSON array döndür. Her mekan için:
-{{"idx": 0, "relevant": true/false, "description": "...", "vibeTags": ["#Tag1"], "noiseLevel": 50, "matchScore": 80}}
-
-Uygun OLMAYAN mekanlar için: {{"idx": X, "relevant": false}}
-ASLA ```json kullanma, sadece JSON array döndür."""
-
-            model = get_genai_model()
-            if not model:
-                # Gemini AI ile deneyim odaklı tatil planı oluştur
-                model = get_genai_model()
-                if not model:
-                    return Response(
-                        {'error': 'Gemini API key eksik'},
-                        status=status.HTTP_503_SERVICE_UNAVAILABLE
-                    )
-
-                try:
-                    # Daha katı, parse-edilebilir prompt (sadece JSON array döndürmesini garanti etmeye çalışır)
-                    experience_prompt = f"""
-            Sen o şehri avucunun içi gibi bilen, cool ve deneyim odaklı bir 'Lokal Rehber'sin.
-            Görevin: "{location_query}" için {duration} günlük, NOKTA ATIŞI ve AKSİYON ODAKLI bir liste hazırlamak.
-
-            ## STRATEJİ: "Sadece Mekan Değil, Deneyim Öner"
-            Kullanıcıya sadece "Louvre Müzesi" deme. "Louvre'da Mona Lisa'yı gör" veya "Tuileries Bahçesinde yürüyüş yap" de.
-
-            ## GÖREVLER
-            1. **Google Search Kullan**: "{location_query} top things to do", "{location_query} best local food" aramaları yap.
-            2. **Rota Planla**: Mekanları birbirine yakınlığına göre günlere ayır.
-            3. **Çeşitlilik**: Landmark, Yeme/İçme, Aktivite karışık olsun.
-            4. **Google Maps Verisi**: Açık/kapalı durumunu, saatleri, telefonu ve fotoğrafı Maps'ten çek.
-
-            ## ÇIKTI FORMATI (SADECE JSON ARRAY)
-            Lütfen ÇOK KESİN OLARAK SADECE ve SADECE bir JSON ARRAY dönün. Hiçbir ek açıklama, başlık ya da Markdown bloğu ekleme.
-            Her obje aşağıdaki alanları içermeli (örnek gösterim):
-            [
-              {
-                "id": "exp_1",
-                "name": "Deneyimin adı (Örn: Eyfel Kulesi'nde gün batımı izle)",
-                "description": "2-3 cümlelik detaylı açıklama. Ne yapılacak, neden özel?",
-                "imageUrl": "https://images.unsplash.com/photo-...",
-                "category": "Tatil",
-                "vibeTags": ["#Romantik", "#Manzara", "#İkonik"],
-                "address": "Gerçek mekan adresi",
-                "priceRange": "$" veya "$$" veya "$$$" veya "$$$$",
-                "googleRating": 4.5,
-                "noiseLevel": 30,
-                "matchScore": 85,
-                "itineraryDay": 1,
-                "metrics": {"ambiance": 85, "accessibility": 90, "popularity": 95}
-              }
-            ]
-
-            Kurallar:
-            - Her gün için 3-4 deneyim öner (toplam {duration * 3} ile {duration * 4}).
-            - Sabah/öğle/akşam dengesi (kahvaltı/brunch, öğlen aktivite, akşam yemek/bar).
-            - Aynı gün içindeki mekanlar birbirine yakın olmalı.
-            """
-
-                    response = model.generate_content(experience_prompt)
-                    response_text = response.text.strip()
-
-                    # Güvenli JSON array çıkarımı: ilk '[' ve son ']' arasını al
-                    try:
-                        first = response_text.find('[')
-                        last = response_text.rfind(']')
-                        if first != -1 and last != -1 and last > first:
-                            json_text = response_text[first:last+1]
-                        else:
-                            # fallback to previous heuristic for codeblocks
-                            if '```json' in response_text:
-                                json_text = response_text.split('```json')[1].split('```')[0].strip()
-                            elif '```' in response_text:
-                                json_text = response_text.split('```')[1].split('```')[0].strip()
-                            else:
-                                json_text = response_text
-
-                        experiences = json.loads(json_text)
-                    except Exception as parse_exc:
-                        import sys
-                        print(f"Vacation JSON parse error: {parse_exc}", file=sys.stderr, flush=True)
-                        # Fallback: generate mock experiences with itineraryDay populated
-                        mock_venues = generate_mock_venues({'name': 'Tatil'}, location, filters)
-                        # convert mock venues into experience-like objects with itineraryDay distribution
-                        experiences = []
-                        day = 1
-                        per_day = max(1, min(4, (trip_duration * 3) // max(1, trip_duration)))
-                        for idx, mv in enumerate(mock_venues):
-                            exp = {
-                                'id': mv.get('id', f'mock_{idx}'),
-                                'name': mv.get('name'),
-                                'description': mv.get('description'),
-                                'imageUrl': mv.get('imageUrl'),
-                                'category': 'Tatil',
-                                'vibeTags': mv.get('vibeTags', []),
-                                'address': mv.get('address'),
-                                'priceRange': mv.get('priceRange'),
-                                'googleRating': mv.get('googleRating'),
-                                'noiseLevel': mv.get('noiseLevel'),
-                                'matchScore': mv.get('matchScore'),
-                                'itineraryDay': (idx // 3) + 1,
-                                'metrics': mv.get('metrics', {})
-                            }
-                            experiences.append(exp)
-
-                    # Ensure each experience has required fields and itineraryDay
-                    for i, exp in enumerate(experiences):
-                        if 'id' not in exp:
-                            exp['id'] = f"exp_{random.randint(1000, 9999)}"
-                        exp['category'] = 'Tatil'
-                        if 'itineraryDay' not in exp or not isinstance(exp['itineraryDay'], int):
-                            exp['itineraryDay'] = 1
-
-                    return Response(experiences, status=status.HTTP_200_OK)
-
-                except Exception as e:
-                    import sys
-                    print(f"❌ Vacation experience generation error: {e}", file=sys.stderr, flush=True)
-                    import traceback
-                    print(traceback.format_exc(), file=sys.stderr, flush=True)
-                    return Response(
-                        {'error': f'Tatil deneyimi oluşturulurken hata: {str(e)}'},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                    )
-
-                # 2. ORTAM TERCİHİ (İç/Dış mekan)
-                amenities = filters.get('amenities', [])
-                if 'Açık Hava' in amenities:
-                    env_logic = "Açık hava/teras/bahçe tercihi VAR. Outdoor seating önemli."
-                elif 'İç Mekan' in amenities:
-                    env_logic = "İç mekan tercihi VAR. Kapalı alan öncelikli."
-                else:
-                    env_logic = "İç/dış mekan tercihi belirtilmemiş."
-
-                # 3. SİGARA/AÇIK ALAN
-                if 'Açık Hava' in amenities:
-                    smoking_logic = "Açık hava tercihi mevcut. Sigara içilebilir alan olması artı."
-                else:
-                    smoking_logic = "Sigara tercihi belirtilmemiş."
-
-                # 4. MÜZİK TERCİHİ
-                vibes = filters.get('vibes', [])
-                if '#Canlı' in vibes or '#Hareketli' in vibes:
-                    music_logic = "Canlı müzik, DJ, hareketli atmosfer BEKLENİYOR. Sessiz mekanlar UYGUN DEĞİL."
-                elif '#Sakin' in vibes or '#Huzurlu' in vibes:
-                    music_logic = "Sakin, sessiz ortam BEKLENİYOR. Yüksek müzikli mekanlar UYGUN DEĞİL."
-                else:
-                    music_logic = "Müzik tercihi belirtilmemiş."
-
-                # 5. ALKOL TERCİHİ - EN ÖNEMLİ FİLTRE!
-                alcohol_pref = filters.get('alcohol', '')
-                category_name = category['name']
-
-                # Kahvaltı kategorileri için alkol öncelikli değil
-                breakfast_categories = ['Kahvaltı', 'Brunch']
-
-                if category_name in breakfast_categories:
-                    alcohol_logic = "Kahvaltı/Brunch kategorisi - Alkol servisi öncelik değil."
-                elif alcohol_pref == 'Alcoholic':
-                    # Kullanıcı açıkça alkollü mekan seçmiş
-                    alcohol_logic = "ALKOL SERVİSİ ZORUNLU! Bar, pub, alkol satan restaurant tercih et. Cafe, kahveci ASLA ÖNERME."
-                elif alcohol_pref == 'Non-Alcoholic':
-                    # Kullanıcı alkolsüz mekan seçmiş
-                    alcohol_logic = "Alkolsüz mekan tercih ediliyor. Cafe, kahveci, family restaurant uygun."
-                elif category_name in ['Arkadaşlarla Takılma', 'Romantik Akşam']:
-                    # Kategori alkollü mekan çağrıştırıyor ama kullanıcı belirtmemiş
-                    alcohol_logic = "Alkol servisi olan mekanlar öncelikli ama zorunlu değil."
-                else:
-                    alcohol_logic = "Alkol tercihi belirtilmemiş."
-
-                # 6. KATEGORİYE ÖZEL MANTIKLAR
-                special_logic = ""
-                if 'museum' in ' '.join(place_types).lower():
-                    special_logic += "- Müze/Kültürel mekan: Eğitici, sakin, kültürel değer önemli.\n"
-                if 'cafe' in ' '.join(place_types).lower() or 'coffee' in ' '.join(place_types).lower():
-                    special_logic += "- Cafe/Kahveci: Kahve kalitesi, çalışma ortamı uygunluğu önemli.\n"
-                if 'gym' in ' '.join(place_types).lower() or 'sports' in ' '.join(place_types).lower():
-                    special_logic += "- Spor tesisi: Ekipman kalitesi, hijyen, aktivite çeşitliliği önemli.\n"
-
-                # GELİŞMİŞ SİSTEM TALİMATI - Kategori + Vibe Derin Analizi
-                system_instruction = f"""# SİSTEM TALİMATI - Mekan Vibe Analisti
-
-Sen yerel mekanları çok iyi tanıyan, vibe analizi konusunda uzman bir asistansın.
-Google Places'ten gelen mekan bilgilerini analiz edip, kullanıcının kategori ve vibe tercihlerine uygunluğunu değerlendiriyorsun.
-
-## 1. KATEGORİ UYGUNLUK ANALİZİ (KESİN KURALLAR)
-
-**İlk Buluşma:**
-✅ UYGUN: cafe, restaurant, coffee shop, wine bar, bistro, tea house
-❌ UYGUN DEĞİL: nightclub, spa, gym, hotel, hospital, store, bank, fast food chain
-
-**Arkadaşlarla Takılma:**
-✅ UYGUN: bar, pub, restaurant, lounge, cafe (eğer sosyalleşmeye uygunsa), brewery
-❌ UYGUN DEĞİL: hospital, hotel, spa, gym, bank, office
-
-**İş Toplantısı:**
-✅ UYGUN: cafe, hotel lounge, restaurant (sakin), coworking space, business center
-❌ UYGUN DEĞİL: nightclub, bar (gürültülü), gym, spa
-
-**Romantik Akşam:**
-✅ UYGUN: romantic restaurant, fine dining, wine bar, rooftop restaurant, bistro
-❌ UYGUN DEĞİL: fast food, cafe (casual), gym, hospital, nightclub (çok gürültülü)
-
-## 2. VİBE UYGUNLUK ANALİZİ (DERİN DEĞERLENDİRME)
-
-**ALKOL FİLTRESİ - EN YÜKSEK ÖNCELİK:**
-- Eğer "ALKOL SERVİSİ ZORUNLU" görürsen:
-  → Mekan TİPİ 'bar', 'pub', 'wine_bar', 'night_club', 'restaurant' olmalı
-  → 'cafe', 'coffee_shop', 'tea_house' ASLA KABUL ETME
-  → Restaurant ise alkol servisi yaptığından emin ol (Google types'da 'bar' veya isminde 'wine', 'cocktail' olmalı)
-
-- Eğer "Alkolsüz mekan" görürsen:
-  → 'bar', 'pub', 'night_club', 'wine_bar' ASLA KABUL ETME
-  → 'cafe', 'coffee_shop', 'restaurant', 'tea_house' tercih et
-
-**MÜZİK/ATMOSFER FİLTRESİ:**
-- Eğer "Canlı müzik BEKLENİYOR" görürsen:
-  → Google types'da 'live_music', 'night_club', 'bar' olmalı
-  → Mekan ismine bak: 'live', 'music', 'jazz', 'rock' gibi kelimeler varsa artı puan
-  → Cafe/sessiz restaurant UYGUN DEĞİL
-
-- Eğer "Sakin ortam BEKLENİYOR" görürsen:
-  → 'night_club', 'bar', 'live_music' UYGUN DEĞİL
-  → 'cafe', 'library', 'quiet restaurant' tercih et
-
-**GRUP BOYUTU FİLTRESİ:**
-- "Big Group" için: Geniş otururma alanı, grup rezervasyonu yapılabilir olmalı
-- "Solo" için: Tek başına çalışma/okuma yapılabilir ortam
-- "Couple" için: İkili masalar, romantik/mahrem atmosfer
-
-## 3. MEKAN TİPİ ANALİZİ (Google Types Kullanımı)
-
-Google'dan gelen `types` alanına DİKKAT ET:
-- 'cafe' + 'bar' birlikte varsa → Alkol servisi YAPILIYORDUR
-- 'coffee_shop' tek başına varsa → Alkol servisi YOK
-- 'restaurant' + 'bar' → Alkol servisi VAR
-- 'restaurant' + 'cafe' → Alkol servisi OLABİLİR (ismi kontrol et)
-
-## 4. MATCH SCORE HESAPLAMA (0-100)
-
-Match score şu kriterlere göre hesapla:
-- Kategori uygunluğu: %40 ağırlık
-- Alkol/müzik/ortam vibe uyumu: %30 ağırlık
-- Grup boyutu uyumu: %15 ağırlık
-- Fiyat uyumu: %15 ağırlık
-
-Örnek:
-- Tam uyumlu mekan: 85-100
-- İyi uyumlu: 70-84
-- Orta uyumlu: 50-69
-- Düşük uyum: 30-49
-- Uygun değil: <30 (isRelevant: false dön)
-
-## 5. ÇIKTI FORMATI
-
-Eğer mekan UYGUN DEĞİLSE (kategori veya vibe uyumsuz):
-{{"isRelevant": false}}
-
-Eğer UYGUNSA:
-{{
-  "isRelevant": true,
-  "description": "2-3 cümle Türkçe açıklama (atmosfer, neden uygun, öne çıkan özellik)",
-  "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
-  "noiseLevel": 0-100,
-  "matchScore": 0-100,
-  "metrics": {{
-    "ambiance": 0-100,
-    "accessibility": 0-100,
-    "popularity": 0-100
-  }}
-}}
-
-## ÖNEMLİ UYARILAR
-- ASLA Markdown kod bloğu kullanma (```json gibi)
-- Sadece düz JSON döndür
-- isRelevant: false için sebep belirtme, sadece false dön
-- Match score'u cömert değil, gerçekçi hesapla
-"""
-
-                user_prompt = f"""# DEĞERLENDİRME TALEBİ
-
-**MEKAN BİLGİLERİ:**
-- İsim: {place_name}
-- Google Types: {', '.join(place_types[:8])}
-- Adres: {place_address}
-- Rating: {place_rating}/5.0 (⭐ {place_review_count} değerlendirme)
-- Fiyat: {price_range}
-
-**KULLANICI İSTEĞİ:**
-- Kategori: {category_name}
-- Grup Boyutu: {group_logic}
-- Ortam Tercihi: {env_logic}
-- Sigara/Açık Alan: {smoking_logic}
-- Müzik Tercihi: {music_logic}
-- Alkol Tercihi: {alcohol_logic}
-
-**ÖZEL NOTLAR:**
-{special_logic if special_logic else "Yok"}
-
----
-
-**GÖREV:** Yukarıdaki mekanı analiz et ve SİSTEM TALİMATI kurallarına göre değerlendir.
-
-ÖZELLİKLE DİKKAT ET:
-1. Google Types listesine bak - mekan gerçekten ne?
-2. Alkol filtresi varsa KESİNLİKLE uygula (cafe ≠ bar!)
-3. Müzik/atmosfer filtresi varsa KESİNLİKLE uygula
-4. Match score'u GERÇEKÇI hesapla (vibe uyumsuzsa düşük ver)
-
-Çıktı (sadece JSON):
-"""
-
-                # Sistem talimatı + kullanıcı promptu birleştir
-                analysis_prompt = system_instruction + "\n\n" + user_prompt
+                SADECE JSON döndür, başka açıklama ekleme.
+                """
 
                 model = get_genai_model()
                 if not model:
@@ -844,10 +455,7 @@ Eğer UYGUNSA:
                     print(f"DEBUG - Skipping irrelevant venue: {place_name}", file=sys.stderr, flush=True)
                     continue
 
-                # Google Maps URL oluştur
-                google_maps_url = f"https://www.google.com/maps/search/?api=1&query={place_name.replace(' ', '+')}&query_place_id={place_id}"
-
-                # Venue objesi oluştur - Google Places bilgilerini kullan, Gemini sadece vibe analizi yapsın
+                # Venue objesi oluştur
                 venue = {
                     'id': f"v{idx + 1}",
                     'name': place_name,
@@ -856,21 +464,15 @@ Eğer UYGUNSA:
                     'category': category['name'],
                     'vibeTags': ai_data.get('vibeTags', ['#Popüler']),
                     'address': place_address,
-                    'googleMapsUrl': google_maps_url,
                     'priceRange': price_range,
                     'googleRating': place_rating if place_rating > 0 else 4.0,
-                    'googleReviewCount': place_review_count,
                     'noiseLevel': ai_data.get('noiseLevel', 50),
                     'matchScore': ai_data.get('matchScore', 75),
                     'metrics': ai_data.get('metrics', {
                         'ambiance': 75,
                         'accessibility': 80,
                         'popularity': 70
-                    }),
-                    # Google Places'ten gelen bilgiler (Gemini'den DEĞİL)
-                    'website': place_website,
-                    'phoneNumber': place_phone,
-                    'hours': place_hours
+                    })
                 }
 
                 venues.append(venue)
