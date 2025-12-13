@@ -46,137 +46,33 @@ def generate_vacation_experiences(location, trip_duration, filters):
         )
 
     try:
-        # Yeni deneyim odaklı prompt - Cool Lokal Rehber tarzı
+        # Kısa ve öz tatil prompt'u
         experience_prompt = f"""
-Sen "{location_query}" şehrini avucunun içi gibi bilen, cool ve deneyim odaklı bir 'Lokal Rehber'sin.
-Görevin: "{location_query}" için {duration} günlük, NOKTA ATIŞI ve AKSİYON ODAKLI bir liste hazırlamak.
+Sen "{location_query}" için {duration} günlük tatil rotası hazırlayan bir seyahat uzmanısın.
 
-## STRATEJİ: "Sadece Mekan Değil, Deneyim Öner"
-Kullanıcıya sadece "Louvre Müzesi" deme. "Louvre'da Mona Lisa'yı gör" veya "Tuileries Bahçesinde yürüyüş yap" de.
+Her gün için 6 aktivite öner: kahvaltı, sabah gezisi, öğle yemeği, öğleden sonra aktivitesi, akşam yemeği, gece aktivitesi.
 
-## GÖREVLER
-1. **Google Search Kullan (Zihinde)**: "{location_query} top things to do", "{location_query} best local food" gibi aramalar düşün.
-2. **Rota Planla**: Mekanları birbirine yakınlığına göre günlere ayır. Aynı bölgedeki aktiviteleri ard arda sırala.
-3. **Çeşitlilik**: Landmark (müze, tarihi yer), Yeme/İçme (kahvaltı, öğle, akşam), Aktivite (yürüyüş, alışveriş) karışık olsun.
-4. **Günlük 8-10 Aktivite**: Her gün sabahtan akşama dolu dolu program (08:00-22:00 arası).
-5. **60% Generic, 40% Spesifik**: Generic aktiviteler kullanıcının keşfetmesini sağlar, spesifik mekanlar ise must-see yerlerdir
+JSON ARRAY formatında döndür. Her aktivite şu alanlara sahip olmalı:
+- id: "day1_1", "day1_2" formatında
+- name: Aktivite adı (örn: "Pantheon'u ziyaret et")
+- description: 1-2 cümle açıklama
+- imageUrl: Unsplash URL (https://images.unsplash.com/photo-...)
+- category: "Tatil"
+- vibeTags: 3 hashtag array
+- address: Tam adres
+- priceRange: "$", "$$" veya "$$$"
+- googleRating: 4.0-5.0 arası
+- noiseLevel: 30-70 arası
+- matchScore: 75-95 arası
+- itineraryDay: Gün numarası (1, 2, 3...)
+- timeSlot: "08:30-09:30" formatında
+- duration: "1 saat" formatında
+- isSpecificVenue: true/false
+- venueName: Mekan ismi (isSpecificVenue=true ise)
+- activityType: breakfast/lunch/dinner/sightseeing/shopping/activity
+- metrics: {{"ambiance": 80, "accessibility": 85, "popularity": 90}}
 
-## GÜNLÜK PROGRAM YAPISI
-Her gün şu yapıda olmalı:
-- 08:00-09:30: Sabah kahvaltısı (yerel bir kafede)
-- 10:00-12:00: Sabah aktivitesi (müze, landmark, gezinti)
-- 12:30-14:00: Öğle yemeği (yerel restoran)
-- 14:30-17:00: Öğleden sonra aktivitesi (müze, park, alışveriş)
-- 17:30-19:00: Akşam aktivitesi (manzara noktası, yürüyüş)
-- 19:30-21:00: Akşam yemeği (restoran, bar)
-- 21:30-23:00: Gece aktivitesi (bar, kulüp, gece gezintisi - opsiyonel)
-
-## ÇIKTI FORMATI (JSON ARRAY)
-[
-  {{
-    "id": "day1_morning_1",
-    "name": "Sant'Eustachio Il Caffè'de geleneksel İtalyan kahvaltısı",
-    "description": "Roma'nın en ünlü kahve dükkanlarından birinde, taze cornetto ve cappuccino ile güne başla. 1938'den beri hizmet veren bu tarihi mekan, Pantheon'a 2 dakika yürüme mesafesinde.",
-    "imageUrl": "https://images.unsplash.com/photo-1509042239860-f550ce710b93",
-    "category": "Tatil",
-    "vibeTags": ["#Kahvaltı", "#Yerel", "#Tarihi"],
-    "address": "Piazza di S. Eustachio, 82, 00186 Roma RM, İtalya",
-    "priceRange": "$",
-    "googleRating": 4.4,
-    "noiseLevel": 45,
-    "matchScore": 88,
-    "itineraryDay": 1,
-    "timeSlot": "08:30-09:30",
-    "duration": "1 saat",
-    "isSpecificVenue": true,
-    "venueName": "Sant'Eustachio Il Caffè",
-    "activityType": "breakfast",
-    "metrics": {{
-      "ambiance": 85,
-      "accessibility": 90,
-      "popularity": 95
-    }}
-  }},
-  {{
-    "id": "day1_morning_2",
-    "name": "Pantheon'u ziyaret et",
-    "description": "2000 yıllık Roma'nın en iyi korunmuş antik yapısını keşfet. Orta kubbedeki açıklıktan giren ışık büyüleyici. Ücretsiz giriş, içeride 30-45 dakika geçir.",
-    "imageUrl": "https://images.unsplash.com/photo-1552832230-c0197dd311b5",
-    "category": "Tatil",
-    "vibeTags": ["#Tarihi", "#Kültür", "#İkonik"],
-    "address": "Piazza della Rotonda, 00186 Roma RM, İtalya",
-    "priceRange": "$",
-    "googleRating": 4.7,
-    "noiseLevel": 60,
-    "matchScore": 92,
-    "itineraryDay": 1,
-    "timeSlot": "10:00-11:00",
-    "duration": "1 saat",
-    "isSpecificVenue": true,
-    "venueName": "Pantheon",
-    "activityType": "sightseeing",
-    "metrics": {{
-      "ambiance": 95,
-      "accessibility": 85,
-      "popularity": 98
-    }}
-  }},
-  {{
-    "id": "day1_lunch_1",
-    "name": "Trastevere'de yerel bir trattoria'da öğle yemeği",
-    "description": "Trastevere bölgesinin dar sokaklarında gizli bir trattoria bul. Cacio e pepe veya carbonara dene. Yerel halk tarafından tercih edilen bu bölge otantik Roma mutfağını sunar.",
-    "imageUrl": "https://images.unsplash.com/photo-1555396273-367ea4eb4db5",
-    "category": "Tatil",
-    "vibeTags": ["#Yerel", "#Otantik", "#İtalyan"],
-    "address": "Trastevere, Roma RM, İtalya",
-    "priceRange": "$$",
-    "googleRating": 4.5,
-    "noiseLevel": 55,
-    "matchScore": 85,
-    "itineraryDay": 1,
-    "timeSlot": "12:30-14:00",
-    "duration": "1.5 saat",
-    "isSpecificVenue": false,
-    "activityType": "lunch",
-    "metrics": {{
-      "ambiance": 80,
-      "accessibility": 85,
-      "popularity": 88
-    }}
-  }}
-]
-
-## KURALLAR
-- {duration} gün × 8-12 aktivite = Toplam {duration * 8} - {duration * 12} aktivite döndür
-- Her aktiviteye "timeSlot" ekle (örn: "08:30-09:30", "14:00-16:30")
-- Her aktiviteye "duration" ekle (örn: "1 saat", "2.5 saat")
-- Kahvaltı, öğle, akşam yemeği MUTLAKA ekle
-- Aktiviteler birbirine yakın olsun (max 15-20 dakika yürüme)
-- Unsplash fotoğraf URL'leri ekle (aktiviteye uygun)
-- Her gün için itineraryDay değerini doğru ata (1, 2, 3...)
-- ID formatı: "day{{X}}_{{zamanDilimi}}_{{sıra}}" (örn: "day1_morning_1", "day2_afternoon_3")
-
-## ÖNEMLİ: isSpecificVenue ve activityType
-- **isSpecificVenue**: true ise gerçek mekan ismi var (örn: "Sant'Eustachio Il Caffè", "Pantheon", "Trevi Çeşmesi")
-- **isSpecificVenue**: false ise generic aktivite (örn: "Trastevere'de yerel trattoria", "Monti bölgesinde vintage butikler")
-- **venueName**: Eğer isSpecificVenue=true ise, mekanın tam ismini yaz. False ise boş bırak.
-- **activityType**: breakfast, lunch, dinner, cafe, bar, dessert, sightseeing, shopping, activity gibi değerler kullan
-
-## GENERIC vs SPESİFİK ÖRNEKLER
-GENERIC (isSpecificVenue=false):
-- "Trastevere'de yerel bir trattoria'da öğle yemeği" (activityType: lunch)
-- "Monti bölgesinde butik mağazalarda alışveriş" (activityType: shopping)
-- "Testaccio'da street food tadımı" (activityType: lunch)
-- "Tiber nehri kenarında yürüyüş" (activityType: activity)
-
-SPESİFİK (isSpecificVenue=true, venueName dolu):
-- "Pantheon'u ziyaret et" (venueName: "Pantheon", activityType: sightseeing)
-- "Sant'Eustachio Il Caffè'de kahvaltı" (venueName: "Sant'Eustachio Il Caffè", activityType: breakfast)
-- "Piazza Navona'da gezinti" (venueName: "Piazza Navona", activityType: sightseeing)
-
-Her gün için 60% generic, 40% spesifik aktivite dengesi kur.
-
-SADECE JSON ARRAY döndür, başka açıklama ekleme.
+Toplam {duration * 6} aktivite döndür. SADECE JSON ARRAY, başka açıklama yok.
 """
 
         response = model.generate_content(experience_prompt)
