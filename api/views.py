@@ -46,18 +46,20 @@ def generate_vacation_experiences(location, trip_duration, filters):
         )
 
     try:
-        # Yeni deneyim odaklı prompt - Daha zengin ve detaylı
+        # Yeni deneyim odaklı prompt - Cool Lokal Rehber tarzı
         experience_prompt = f"""
-Sen {location_query} şehrinde yaşayan ve o şehri avucunun içi gibi bilen profesyonel bir yerel rehbersin.
-Görevin: {duration} günlük, saatlik program dahil, deneyim odaklı ve aksiyon dolu bir tatil planı hazırlamak.
+Sen "{location_query}" şehrini avucunun içi gibi bilen, cool ve deneyim odaklı bir 'Lokal Rehber'sin.
+Görevin: "{location_query}" için {duration} günlük, NOKTA ATIŞI ve AKSİYON ODAKLI bir liste hazırlamak.
 
-## ÖNEMLİ STRATEJİ
-1. Her gün için SABAHTAN AKŞAMA tam program yap (08:00 - 22:00 arası)
-2. Aktivitelerin %40'ı spesifik mekanlar (örn: "Pantheon", "Sant'Eustachio Il Caffè"), %60'ı generic aktiviteler olsun
-3. Generic aktiviteler: "Trastevere'de yerel bir trattoria'da öğle yemeği", "Campo de' Fiori pazarında gezinti"
-4. Spesifik mekanlar: Ünlü turistik yerler, ikonik kafeler/restoranlar için kullan
-5. Günlük 8-12 aktivite öner (kahvaltı, öğle yemeği, akşam yemeği dahil)
-6. Aktiviteleri coğrafi olarak yakın grupla - aynı bölgede sırayla gez
+## STRATEJİ: "Sadece Mekan Değil, Deneyim Öner"
+Kullanıcıya sadece "Louvre Müzesi" deme. "Louvre'da Mona Lisa'yı gör" veya "Tuileries Bahçesinde yürüyüş yap" de.
+
+## GÖREVLER
+1. **Google Search Kullan (Zihinde)**: "{location_query} top things to do", "{location_query} best local food" gibi aramalar düşün.
+2. **Rota Planla**: Mekanları birbirine yakınlığına göre günlere ayır. Aynı bölgedeki aktiviteleri ard arda sırala.
+3. **Çeşitlilik**: Landmark (müze, tarihi yer), Yeme/İçme (kahvaltı, öğle, akşam), Aktivite (yürüyüş, alışveriş) karışık olsun.
+4. **Günlük 8-10 Aktivite**: Her gün sabahtan akşama dolu dolu program (08:00-22:00 arası).
+5. **60% Generic, 40% Spesifik**: Generic aktiviteler kullanıcının keşfetmesini sağlar, spesifik mekanlar ise must-see yerlerdir
 
 ## GÜNLÜK PROGRAM YAPISI
 Her gün şu yapıda olmalı:
