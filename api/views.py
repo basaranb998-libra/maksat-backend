@@ -7,6 +7,7 @@ from django.contrib.auth.models import User
 from django.conf import settings
 import googlemaps
 import google.generativeai as genai
+import urllib.parse
 
 from .models import FavoriteVenue, SearchHistory, UserProfile
 from .serializers import (
@@ -424,8 +425,9 @@ def generate_venues(request):
                 if photo_name:
                     photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?key={settings.GOOGLE_MAPS_API_KEY}&maxWidthPx=800"
 
-            # Google Maps URL - place_id ile direkt link
-            google_maps_url = f"https://www.google.com/maps/place/?q=place_id:{place_id}"
+            # Google Maps URL - mekan ismi ve adresi ile arama
+            search_query = urllib.parse.quote(f"{place_name} {place_address}")
+            google_maps_url = f"https://www.google.com/maps/search/?api=1&query={search_query}"
 
             # Fiyat aralığı (yeni API PRICE_LEVEL_* formatı)
             price_level_str = place.get('priceLevel', 'PRICE_LEVEL_MODERATE')
