@@ -522,10 +522,10 @@ def generate_venues(request):
         # Lokasyon oluştur
         city = location['city']
         districts = location.get('districts', [])
-        search_location = f"{districts[0]}, {city}" if districts else city
+        selected_district = districts[0] if districts else None
+        search_location = f"{selected_district}, {city}" if selected_district else city
         import sys
-        print(f"DEBUG - Alcohol Filter: {alcohol_filter}", file=sys.stderr, flush=True)
-        print(f"DEBUG - Search Query: {search_query}", file=sys.stderr, flush=True)
+        print(f"DEBUG - Selected District: {selected_district}", file=sys.stderr, flush=True)
         print(f"DEBUG - Search Location: {search_location}", file=sys.stderr, flush=True)
 
         # Google Places API'den mekan ara
@@ -576,12 +576,25 @@ def generate_venues(request):
         filtered_places = []
         alcohol_filter = filters.get('alcohol', 'Any')
 
-        for idx, place in enumerate(places_result.get('results', [])[:15]):
+        for idx, place in enumerate(places_result.get('results', [])[:20]):
             place_id = place.get('id', f"place_{idx}")
             place_name = place.get('displayName', {}).get('text', '')
             place_address = place.get('formattedAddress', '')
             place_rating = place.get('rating', 0)
             place_types = place.get('types', [])
+
+            # ===== İLÇE FİLTRESİ: Seçilen ilçeye ait olmayan mekanları atla =====
+            if selected_district:
+                # Adres içinde ilçe adı var mı kontrol et (büyük/küçük harf duyarsız)
+                address_lower = place_address.lower()
+                district_lower = selected_district.lower()
+                # Türkçe karakterleri normalize et
+                district_normalized = district_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                address_normalized = address_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+
+                if district_lower not in address_lower and district_normalized not in address_normalized:
+                    print(f"❌ İLÇE REJECT - {place_name} adresi '{selected_district}' içermiyor: {place_address}", file=sys.stderr, flush=True)
+                    continue
 
             # Fotoğraf URL'si
             photo_url = None
