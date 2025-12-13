@@ -626,14 +626,38 @@ def generate_venues(request):
                     continue
 
             # ===== ALKOL FİLTRESİ SERVER-SIDE DOĞRULAMA =====
+            # Mekan ismini küçük harfe çevir (Türkçe karakterleri normalize et)
+            place_name_lower = place_name.lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+            place_types_str = ' '.join(place_types).lower()
+
             if alcohol_filter == 'Alcoholic':
-                coffee_types = ['cafe', 'coffee_shop', 'bakery', 'coffee', 'tea_house', 'pastry_shop']
-                if any(t in place_types for t in coffee_types):
+                # Kahve/kafe mekanlarını filtrele - hem types hem isimde kontrol et
+                coffee_keywords = ['cafe', 'coffee', 'kahve', 'kafe', 'bakery', 'tea_house', 'pastry', 'patisserie', 'firin', 'borek']
+
+                # Types içinde varsa filtrele
+                if any(keyword in place_types_str for keyword in coffee_keywords):
+                    print(f"❌ ALKOL REJECT (type) - {place_name}: types={place_types}", file=sys.stderr, flush=True)
+                    continue
+
+                # İsimde "cafe", "coffee", "kahve" varsa ve bar/pub içermiyorsa filtrele
+                is_coffee_name = any(keyword in place_name_lower for keyword in ['cafe', 'coffee', 'kahve', 'kafe'])
+                is_bar_name = any(keyword in place_name_lower for keyword in ['bar', 'pub', 'bira', 'meyhane', 'wine'])
+                if is_coffee_name and not is_bar_name:
+                    print(f"❌ ALKOL REJECT (isim) - {place_name}: kahve/kafe isimli", file=sys.stderr, flush=True)
                     continue
 
             elif alcohol_filter == 'Non-Alcoholic':
-                alcohol_types = ['bar', 'pub', 'nightclub', 'wine_bar', 'liquor_store', 'cocktail_bar']
-                if any(t in place_types for t in alcohol_types):
+                # Alkollü mekanları filtrele - hem types hem isimde kontrol et
+                alcohol_keywords = ['bar', 'pub', 'nightclub', 'wine_bar', 'liquor', 'cocktail', 'meyhane', 'bira']
+
+                # Types içinde varsa filtrele
+                if any(keyword in place_types_str for keyword in alcohol_keywords):
+                    print(f"❌ ALKOLSÜZ REJECT (type) - {place_name}: types={place_types}", file=sys.stderr, flush=True)
+                    continue
+
+                # İsimde "bar", "pub", "meyhane" varsa filtrele
+                if any(keyword in place_name_lower for keyword in ['bar', 'pub', 'meyhane', 'bira', 'wine', 'cocktail']):
+                    print(f"❌ ALKOLSÜZ REJECT (isim) - {place_name}: alkollü isimli", file=sys.stderr, flush=True)
                     continue
 
             # Filtreyi geçen mekanları topla
