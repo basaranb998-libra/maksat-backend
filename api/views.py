@@ -571,170 +571,168 @@ def generate_venues(request):
             mock_venues = generate_mock_venues(category, location, filters)
             return Response(mock_venues, status=status.HTTP_200_OK)
 
+        # ===== PHASE 1: Google Places'dan mekanları topla ve ön-filtrele =====
         venues = []
+        filtered_places = []
+        alcohol_filter = filters.get('alcohol', 'Any')
+
         for idx, place in enumerate(places_result.get('results', [])[:15]):
-            # Yeni API formatı
             place_id = place.get('id', f"place_{idx}")
             place_name = place.get('displayName', {}).get('text', '')
             place_address = place.get('formattedAddress', '')
             place_rating = place.get('rating', 0)
             place_types = place.get('types', [])
 
-            # Fotoğraf URL'si (yeni API formatı)
+            # Fotoğraf URL'si
             photo_url = None
             if place.get('photos') and len(place['photos']) > 0:
                 photo_name = place['photos'][0].get('name', '')
                 if photo_name:
                     photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?key={settings.GOOGLE_MAPS_API_KEY}&maxWidthPx=800"
 
-            # Google Maps URL - mekan ismi ve adresi ile arama
-            search_query = urllib.parse.quote(f"{place_name} {place_address}")
-            google_maps_url = f"https://www.google.com/maps/search/?api=1&query={search_query}"
+            # Google Maps URL
+            maps_query = urllib.parse.quote(f"{place_name} {place_address}")
+            google_maps_url = f"https://www.google.com/maps/search/?api=1&query={maps_query}"
 
-            # Fiyat aralığı (yeni API PRICE_LEVEL_* formatı)
+            # Fiyat aralığı
             price_level_str = place.get('priceLevel', 'PRICE_LEVEL_MODERATE')
             price_level_map = {
-                'PRICE_LEVEL_FREE': 1,
-                'PRICE_LEVEL_INEXPENSIVE': 1,
-                'PRICE_LEVEL_MODERATE': 2,
-                'PRICE_LEVEL_EXPENSIVE': 3,
+                'PRICE_LEVEL_FREE': 1, 'PRICE_LEVEL_INEXPENSIVE': 1,
+                'PRICE_LEVEL_MODERATE': 2, 'PRICE_LEVEL_EXPENSIVE': 3,
                 'PRICE_LEVEL_VERY_EXPENSIVE': 4
             }
             price_level = price_level_map.get(price_level_str, 2)
             price_map = {1: '$', 2: '$$', 3: '$$$', 4: '$$$$'}
             price_range = price_map.get(price_level, '$$')
 
-            # Budget filtresine göre kontrol et
+            # Budget filtresine göre kontrol
             budget_filter = filters.get('budget')
             if budget_filter:
                 budget_map = {'Ekonomik': [1, 2], 'Orta': [2, 3], 'Lüks': [3, 4]}
                 if budget_filter in budget_map and price_level not in budget_map[budget_filter]:
                     continue
 
-            # ===== ALKOL FİLTRESİ SERVER-SIDE DOĞRULAMA (Gemini'den ÖNCE) =====
-            # Bu kontrol Gemini'ye gitmeden ÖNCE yapılır ve kesin kurallara göre reddeder
-            alcohol_filter = filters.get('alcohol', 'Any')
-
-            # Alkollü mekan isteniyor ama coffee shop/cafe gelmiş → Reddet
+            # ===== ALKOL FİLTRESİ SERVER-SIDE DOĞRULAMA =====
             if alcohol_filter == 'Alcoholic':
                 coffee_types = ['cafe', 'coffee_shop', 'bakery', 'coffee', 'tea_house', 'pastry_shop']
                 if any(t in place_types for t in coffee_types):
-                    print(f"❌ SERVER REJECT - Alcoholic filter but coffee shop: {place_name} (types: {place_types})", file=sys.stderr, flush=True)
-                    continue  # Bu mekanı atla, Gemini'ye gönderme
+                    continue
 
-            # Alkolsüz mekan isteniyor ama bar/pub gelmiş → Reddet
             elif alcohol_filter == 'Non-Alcoholic':
                 alcohol_types = ['bar', 'pub', 'nightclub', 'wine_bar', 'liquor_store', 'cocktail_bar']
                 if any(t in place_types for t in alcohol_types):
-                    print(f"❌ SERVER REJECT - Non-Alcoholic filter but bar: {place_name} (types: {place_types})", file=sys.stderr, flush=True)
-                    continue  # Bu mekanı atla, Gemini'ye gönderme
-
-            # Gemini ile detaylı analiz ve kategori uygunluk kontrolü
-            try:
-                # Kullanıcı vibe filterlerini hazırla - SADECE "Any" OLMAYAN değerleri ekle
-                user_preferences = []
-                if filters.get('groupSize') and filters['groupSize'] != 'Any':
-                    user_preferences.append(f"Grup: {filters['groupSize']}")
-                if filters.get('budget') and filters['budget'] != 'Any':
-                    user_preferences.append(f"Bütçe: {filters['budget']}")
-
-                # KRİTİK FİLTRELER - Sadece Any olmayan değerler
-                if filters.get('alcohol') and filters['alcohol'] != 'Any':
-                    user_preferences.append(f"ALKOL: {filters['alcohol']}")
-                if filters.get('liveMusic') and filters['liveMusic'] != 'Any':
-                    user_preferences.append(f"CANLI MÜZİK: {filters['liveMusic']}")
-                if filters.get('smoking') and filters['smoking'] != 'Any':
-                    user_preferences.append(f"SİGARA: {filters['smoking']}")
-                if filters.get('environment') and filters['environment'] != 'Any':
-                    user_preferences.append(f"ORTAM: {filters['environment']}")
-
-                preferences_text = ", ".join(user_preferences) if user_preferences else "Özel tercih yok"
-
-                # Debug log
-                print(f"📋 Gemini'ye giden filtreler: {preferences_text}", file=sys.stderr, flush=True)
-
-                analysis_prompt = f"""Mekan: {place_name}
-Tip: {', '.join(place_types[:3])}
-Kategori: {category['name']}
-Filtreler: {preferences_text}
-
-KURALLAR:
-- ALKOL: Alcoholic → bar/pub/restaurant kabul, cafe/bakery RED
-- ALKOL: Non-Alcoholic → cafe/bakery kabul, bar/pub RED
-- CANLI MÜZİK: Yes → canlı müzik olan mekanlar kabul
-- SİGARA: Allowed → açık alan veya sigara izinli mekanlar
-- ORTAM: Indoor → kapalı mekanlar, Outdoor → açık hava
-
-Bu mekan filtrelere uygun mu? JSON döndür:
-{{"isRelevant": true/false, "description": "2 cümle Türkçe açıklama", "vibeTags": ["#Tag1", "#Tag2", "#Tag3"], "noiseLevel": 30-70, "matchScore": 75-95, "metrics": {{"ambiance": 70-95, "accessibility": 70-95, "popularity": 70-95}}}}
-
-SADECE JSON, başka bir şey yazma."""
-
-                model = get_genai_model()
-                if not model:
-                    raise Exception("Gemini API key eksik")
-                response = model.generate_content(analysis_prompt)
-
-                # JSON parse et
-                response_text = response.text.strip()
-                if '```json' in response_text:
-                    response_text = response_text.split('```json')[1].split('```')[0].strip()
-                elif '```' in response_text:
-                    response_text = response_text.split('```')[1].split('```')[0].strip()
-
-                ai_data = json.loads(response_text)
-
-                # Kategoriye uygun değilse skip et
-                if not ai_data.get('isRelevant', True):
-                    print(f"DEBUG - Skipping irrelevant venue: {place_name}", file=sys.stderr, flush=True)
                     continue
 
-                # Venue objesi oluştur
-                venue = {
-                    'id': f"v{idx + 1}",
-                    'name': place_name,
-                    'description': ai_data.get('description', 'Açıklama ekleniyor...'),
-                    'imageUrl': photo_url or 'https://via.placeholder.com/800x600',
-                    'category': category['name'],
-                    'vibeTags': ai_data.get('vibeTags', ['#Popüler']),
-                    'address': place_address,
-                    'priceRange': price_range,
-                    'googleRating': place_rating if place_rating > 0 else 4.0,
-                    'noiseLevel': ai_data.get('noiseLevel', 50),
-                    'matchScore': ai_data.get('matchScore', 75),
-                    'googleMapsUrl': google_maps_url,
-                    'metrics': ai_data.get('metrics', {
-                        'ambiance': 75,
-                        'accessibility': 80,
-                        'popularity': 70
-                    })
-                }
+            # Filtreyi geçen mekanları topla
+            filtered_places.append({
+                'idx': idx,
+                'name': place_name,
+                'address': place_address,
+                'rating': place_rating,
+                'types': place_types,
+                'photo_url': photo_url,
+                'google_maps_url': google_maps_url,
+                'price_range': price_range
+            })
 
-                venues.append(venue)
+        # ===== PHASE 2: TEK BİR BATCH GEMİNİ ÇAĞRISI =====
+        if filtered_places:
+            # Kullanıcı tercihlerini hazırla
+            user_preferences = []
+            if filters.get('groupSize') and filters['groupSize'] != 'Any':
+                user_preferences.append(f"Grup: {filters['groupSize']}")
+            if filters.get('alcohol') and filters['alcohol'] != 'Any':
+                user_preferences.append(f"ALKOL: {filters['alcohol']}")
+            if filters.get('liveMusic') and filters['liveMusic'] != 'Any':
+                user_preferences.append(f"CANLI MÜZİK: {filters['liveMusic']}")
+            if filters.get('smoking') and filters['smoking'] != 'Any':
+                user_preferences.append(f"SİGARA: {filters['smoking']}")
+            if filters.get('environment') and filters['environment'] != 'Any':
+                user_preferences.append(f"ORTAM: {filters['environment']}")
+
+            preferences_text = ", ".join(user_preferences) if user_preferences else "Özel tercih yok"
+            print(f"📋 Gemini BATCH çağrısı - {len(filtered_places)} mekan, filtreler: {preferences_text}", file=sys.stderr, flush=True)
+
+            # Tüm mekanları tek bir prompt'ta gönder
+            places_list = "\n".join([
+                f"{i+1}. {p['name']} | Tip: {', '.join(p['types'][:2])}"
+                for i, p in enumerate(filtered_places[:10])  # Max 10 mekan
+            ])
+
+            batch_prompt = f"""Kategori: {category['name']}
+Filtreler: {preferences_text}
+
+Aşağıdaki mekanları analiz et ve her biri için JSON döndür:
+{places_list}
+
+Her mekan için şu formatta JSON objesi oluştur:
+{{"name": "Mekan Adı", "isRelevant": true/false, "description": "2 cümle Türkçe açıklama", "vibeTags": ["#Tag1", "#Tag2", "#Tag3"], "noiseLevel": 30-70, "matchScore": 75-95}}
+
+JSON ARRAY olarak döndür. Sadece uygun mekanları dahil et. SADECE JSON ARRAY, başka bir şey yazma."""
+
+            try:
+                model = get_genai_model()
+                if model:
+                    response = model.generate_content(batch_prompt)
+                    response_text = response.text.strip()
+
+                    # JSON parse
+                    if '```json' in response_text:
+                        response_text = response_text.split('```json')[1].split('```')[0].strip()
+                    elif '```' in response_text:
+                        response_text = response_text.split('```')[1].split('```')[0].strip()
+
+                    ai_results = json.loads(response_text)
+
+                    # AI sonuçlarını mekanlarla eşleştir
+                    ai_by_name = {r.get('name', '').lower(): r for r in ai_results}
+
+                    for place in filtered_places[:10]:
+                        ai_data = ai_by_name.get(place['name'].lower(), {})
+
+                        # Uygun değilse skip
+                        if ai_data and not ai_data.get('isRelevant', True):
+                            continue
+
+                        venue = {
+                            'id': f"v{place['idx'] + 1}",
+                            'name': place['name'],
+                            'description': ai_data.get('description', f"{category['name']} için harika bir mekan."),
+                            'imageUrl': place['photo_url'] or 'https://via.placeholder.com/800x600',
+                            'category': category['name'],
+                            'vibeTags': ai_data.get('vibeTags', ['#Popüler', '#Kaliteli']),
+                            'address': place['address'],
+                            'priceRange': place['price_range'],
+                            'googleRating': place['rating'] if place['rating'] > 0 else 4.0,
+                            'noiseLevel': ai_data.get('noiseLevel', 50),
+                            'matchScore': ai_data.get('matchScore', 80),
+                            'googleMapsUrl': place['google_maps_url'],
+                            'metrics': {'ambiance': 80, 'accessibility': 85, 'popularity': 75}
+                        }
+                        venues.append(venue)
+
+                    print(f"✅ Gemini batch sonucu: {len(venues)} mekan", file=sys.stderr, flush=True)
 
             except Exception as e:
-                print(f"AI analiz hatası: {e}")
-                # Fallback venue data
-                venue = {
-                    'id': f"v{idx + 1}",
-                    'name': place_name,
-                    'description': f"{category['name']} için harika bir mekan seçeneği.",
-                    'imageUrl': photo_url or 'https://via.placeholder.com/800x600',
-                    'category': category['name'],
-                    'vibeTags': ['#Popüler', '#Kaliteli'],
-                    'address': place_address,
-                    'priceRange': price_range,
-                    'googleRating': place_rating if place_rating > 0 else 4.0,
-                    'noiseLevel': 50,
-                    'matchScore': 75,
-                    'googleMapsUrl': google_maps_url,
-                    'metrics': {
-                        'ambiance': 75,
-                        'accessibility': 80,
-                        'popularity': 70
+                print(f"❌ Gemini batch hatası: {e}", file=sys.stderr, flush=True)
+                # Fallback: Gemini olmadan mekanları ekle
+                for place in filtered_places[:10]:
+                    venue = {
+                        'id': f"v{place['idx'] + 1}",
+                        'name': place['name'],
+                        'description': f"{category['name']} için harika bir mekan seçeneği.",
+                        'imageUrl': place['photo_url'] or 'https://via.placeholder.com/800x600',
+                        'category': category['name'],
+                        'vibeTags': ['#Popüler', '#Kaliteli'],
+                        'address': place['address'],
+                        'priceRange': place['price_range'],
+                        'googleRating': place['rating'] if place['rating'] > 0 else 4.0,
+                        'noiseLevel': 50,
+                        'matchScore': 75,
+                        'googleMapsUrl': place['google_maps_url'],
+                        'metrics': {'ambiance': 75, 'accessibility': 80, 'popularity': 70}
                     }
-                }
-                venues.append(venue)
+                    venues.append(venue)
 
         # Match score'a göre sırala
         venues.sort(key=lambda x: x['matchScore'], reverse=True)
