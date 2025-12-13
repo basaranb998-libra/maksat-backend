@@ -129,32 +129,19 @@ def generate_michelin_restaurants(location, filters):
     try:
         # Gemini'ye Michelin Guide bilgisi ile restoran listesi oluşturmasını iste
         michelin_prompt = f"""
-Sen Türkiye'deki Michelin Guide restoranları konusunda uzman bir gastronomi danışmanısın.
+{city} şehrindeki Michelin Guide 2024 restoranlarını listele.
 
-{city} şehrindeki Michelin Guide'da yer alan restoranları listele.
-Michelin yıldızlı, Bib Gourmand veya Michelin tavsiyeli restoranlar olabilir.
+Michelin Guide Türkiye'de {city} için:
+- Michelin Yıldızlı restoranlar (1, 2 veya 3 yıldız)
+- Bib Gourmand restoranlar
+- Michelin Tavsiyeli (Selected) restoranlar
 
-Her restoran için JSON formatında şu bilgileri ver:
-- id: benzersiz id (michelin_1, michelin_2...)
-- name: Restoran adı
-- description: 2 cümle Türkçe açıklama (mutfak tarzı, öne çıkan özellikler)
-- imageUrl: "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800" (fine dining görseli)
-- category: "Michelin Yıldızlı"
-- vibeTags: 3 hashtag ["#MichelinGuide", "#FineDining", "#GurmeRestoran"]
-- address: Tam adres ({city}, Türkiye)
-- priceRange: "$$$" veya "$$$$"
-- googleRating: 4.5-5.0 arası
-- noiseLevel: 25-45 arası (fine dining genelde sessiz)
-- matchScore: 85-98 arası
-- googleMapsUrl: "" (boş bırak, sonra dolduracağız)
-- michelinStatus: "1 Yıldız", "2 Yıldız", "3 Yıldız", "Bib Gourmand" veya "Michelin Tavsiyeli"
-- metrics: {{"ambiance": 90, "accessibility": 85, "popularity": 95}}
+EN AZ 15 RESTORAN LİSTELE. Eğer {city}'de yeterli Michelin restoranı yoksa, yakın bölgelerden (Urla, Çeşme, Alaçatı, Foça vb.) de ekle.
 
-{city} için bilinen TÜM Michelin Guide restoranlarını listele.
-Eğer {city}'de Michelin restoranı yoksa veya az ise, en yakın büyük şehirdeki (İstanbul, Ankara, İzmir) Michelin restoranlarını da öner.
+JSON ARRAY formatında döndür. Her restoran:
+{{"id": "michelin_1", "name": "Restoran Adı", "description": "2 cümle açıklama", "imageUrl": "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800", "category": "Michelin Yıldızlı", "vibeTags": ["#MichelinGuide", "#FineDining", "#Restoran"], "address": "Tam adres, {city}", "priceRange": "$$$", "googleRating": 4.7, "noiseLevel": 35, "matchScore": 92, "googleMapsUrl": "", "michelinStatus": "Michelin Tavsiyeli", "metrics": {{"ambiance": 90, "accessibility": 85, "popularity": 95}}}}
 
-SADECE JSON ARRAY döndür, başka açıklama yazma.
-"""
+SADECE JSON ARRAY döndür. Minimum 15 restoran."""
 
         print(f"🍽️ Michelin Guide araması: {city}", file=sys.stderr, flush=True)
 
