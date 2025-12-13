@@ -24,8 +24,8 @@ def get_gmaps_client():
 def get_genai_model():
     if settings.GEMINI_API_KEY:
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        # Gemini 2.5 Flash - En hızlı ve güncel model
-        return genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+        # Gemini 2.5 Flash - En güncel ve hızlı model
+        return genai.GenerativeModel('gemini-2.5-flash')
     return None
 
 def generate_vacation_experiences(location, trip_duration, filters):
