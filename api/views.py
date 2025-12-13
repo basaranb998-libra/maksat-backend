@@ -175,6 +175,75 @@ SADECE JSON ARRAY döndür. Minimum 15 restoran."""
         )
 
 
+def generate_local_festivals(location, filters):
+    """Yerel Festivaller kategorisi için festival ve etkinlik listesi"""
+    import json
+    import sys
+    from datetime import datetime
+
+    city = location['city']
+    current_month = datetime.now().strftime("%B")
+    current_year = datetime.now().year
+
+    model = get_genai_model()
+    if not model:
+        return Response(
+            {'error': 'Gemini API key eksik'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+    try:
+        festival_prompt = f"""
+{city} ve çevresinde yaklaşan festivaller ve etkinlikleri listele.
+
+Şu anki tarih: {current_month} {current_year}
+
+Festival türleri:
+- Gastronomi festivalleri (yemek, şarap, zeytinyağı vb.)
+- Müzik festivalleri
+- Kültür ve sanat festivalleri
+- Hasat festivalleri
+- Yerel geleneksel festivaller
+
+EN AZ 12 FESTİVAL LİSTELE. Önümüzdeki 6 ay içindeki etkinlikleri dahil et.
+
+JSON ARRAY formatında döndür. Her festival:
+{{"id": "festival_1", "name": "Festival Adı", "description": "2 cümle açıklama - ne tür festival, ne yapılıyor", "imageUrl": "https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=800", "category": "Yerel Festivaller", "vibeTags": ["#Festival", "#Gastronomi", "#YerelLezzet"], "address": "Festival lokasyonu, {city}", "priceRange": "$$", "googleRating": 4.5, "noiseLevel": 65, "matchScore": 88, "googleMapsUrl": "", "isEvent": true, "eventDate": "15-17 Ocak 2025", "ticketUrl": "", "metrics": {{"ambiance": 85, "accessibility": 80, "popularity": 90}}}}
+
+SADECE JSON ARRAY döndür. Minimum 12 festival."""
+
+        print(f"🎪 Yerel Festivaller araması: {city}", file=sys.stderr, flush=True)
+
+        response = model.generate_content(festival_prompt)
+        response_text = response.text.strip()
+
+        # JSON parse et
+        if '```json' in response_text:
+            response_text = response_text.split('```json')[1].split('```')[0].strip()
+        elif '```' in response_text:
+            response_text = response_text.split('```')[1].split('```')[0].strip()
+
+        festivals = json.loads(response_text)
+
+        # Google Maps URL ekle
+        for festival in festivals:
+            search_query = urllib.parse.quote(f"{festival['name']} {city} festival")
+            festival['googleMapsUrl'] = f"https://www.google.com/maps/search/?api=1&query={search_query}"
+
+        print(f"✅ {len(festivals)} festival bulundu", file=sys.stderr, flush=True)
+
+        return Response(festivals, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"❌ Festival generation error: {e}", file=sys.stderr, flush=True)
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
+        return Response(
+            {'error': f'Festivaller getirilirken hata: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 def generate_mock_venues(category, location, filters):
     """Mock venue data generator"""
     import random
@@ -332,7 +401,11 @@ def generate_venues(request):
         if category['name'] == 'Michelin Yıldızlı':
             return generate_michelin_restaurants(location, filters)
 
-        # Kategori bazlı query mapping (Tatil ve Michelin hariç)
+        # Yerel Festivaller kategorisi için özel işlem
+        if category['name'] == 'Yerel Festivaller':
+            return generate_local_festivals(location, filters)
+
+        # Kategori bazlı query mapping (Tatil, Michelin ve Festivaller hariç)
         # ALKOL FİLTRESİNE GÖRE DİNAMİK QUERY OLUŞTUR
         alcohol_filter = filters.get('alcohol', 'Any')
 
