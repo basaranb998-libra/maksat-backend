@@ -464,119 +464,44 @@ def generate_venues(request):
 
             # Gemini ile detaylı analiz ve kategori uygunluk kontrolü
             try:
-                # Kullanıcı vibe filterlerini hazırla
+                # Kullanıcı vibe filterlerini hazırla - SADECE "Any" OLMAYAN değerleri ekle
                 user_preferences = []
-                if filters.get('groupSize'):
-                    user_preferences.append(f"Grup Boyutu: {filters['groupSize']}")
-                if filters.get('budget'):
+                if filters.get('groupSize') and filters['groupSize'] != 'Any':
+                    user_preferences.append(f"Grup: {filters['groupSize']}")
+                if filters.get('budget') and filters['budget'] != 'Any':
                     user_preferences.append(f"Bütçe: {filters['budget']}")
-                if filters.get('vibes'):
-                    user_preferences.append(f"Vibe'lar: {', '.join(filters['vibes'])}")
-                if filters.get('amenities'):
-                    user_preferences.append(f"İmkanlar: {', '.join(filters['amenities'])}")
 
-                # ÇOK ÖNEMLİ: Alkol/Sigara/Müzik filtreleri
-                if filters.get('alcohol'):
-                    user_preferences.append(f"🍷 Alkol: {filters['alcohol']}")
-                if filters.get('liveMusic'):
-                    user_preferences.append(f"🎵 Canlı Müzik: {filters['liveMusic']}")
-                if filters.get('smoking'):
-                    user_preferences.append(f"🚬 Sigara: {filters['smoking']}")
-                if filters.get('environment'):
-                    user_preferences.append(f"🏠 Ortam: {filters['environment']}")
+                # KRİTİK FİLTRELER - Sadece Any olmayan değerler
+                if filters.get('alcohol') and filters['alcohol'] != 'Any':
+                    user_preferences.append(f"ALKOL: {filters['alcohol']}")
+                if filters.get('liveMusic') and filters['liveMusic'] != 'Any':
+                    user_preferences.append(f"CANLI MÜZİK: {filters['liveMusic']}")
+                if filters.get('smoking') and filters['smoking'] != 'Any':
+                    user_preferences.append(f"SİGARA: {filters['smoking']}")
+                if filters.get('environment') and filters['environment'] != 'Any':
+                    user_preferences.append(f"ORTAM: {filters['environment']}")
 
-                preferences_text = "\n".join(user_preferences) if user_preferences else "Belirtilmemiş"
+                preferences_text = ", ".join(user_preferences) if user_preferences else "Özel tercih yok"
 
-                analysis_prompt = f"""
-Sen bir mekan filtreleme asistanısın. Görevin: Verilen mekanın kullanıcı tercihlerine uygun olup olmadığını kontrol etmek.
+                # Debug log
+                print(f"📋 Gemini'ye giden filtreler: {preferences_text}", file=sys.stderr, flush=True)
 
-MEKAN BİLGİSİ:
-- İsim: {place_name}
-- Tip: {', '.join(place_types[:3])}
-- Rating: {place_rating}
-- Fiyat: {price_range}
+                analysis_prompt = f"""Mekan: {place_name}
+Tip: {', '.join(place_types[:3])}
+Kategori: {category['name']}
+Filtreler: {preferences_text}
 
-İSTENEN KATEGORİ: {category['name']}
+KURALLAR:
+- ALKOL: Alcoholic → bar/pub/restaurant kabul, cafe/bakery RED
+- ALKOL: Non-Alcoholic → cafe/bakery kabul, bar/pub RED
+- CANLI MÜZİK: Yes → canlı müzik olan mekanlar kabul
+- SİGARA: Allowed → açık alan veya sigara izinli mekanlar
+- ORTAM: Indoor → kapalı mekanlar, Outdoor → açık hava
 
-KULLANICI FİLTRELERİ:
-{preferences_text}
+Bu mekan filtrelere uygun mu? JSON döndür:
+{{"isRelevant": true/false, "description": "2 cümle Türkçe açıklama", "vibeTags": ["#Tag1", "#Tag2", "#Tag3"], "noiseLevel": 30-70, "matchScore": 75-95, "metrics": {{"ambiance": 70-95, "accessibility": 70-95, "popularity": 70-95}}}}
 
-=== KRİTİK ALKOL FİLTRESİ KURALLARI (EN ÖNEMLİ) ===
-
-ÖNEMLİ: Aşağıdaki kuralları HARFIYYEN uygula:
-
-1. EĞER filtrelerde "🍷 Alkol: Alcoholic" VARSA:
-   → Mekan tipi "cafe", "coffee_shop", "bakery", "coffee" içeriyorsa → MUTLAKA "isRelevant": false
-   → Sadece "bar", "pub", "nightclub", "restaurant", "wine_bar" gibi alkol servisi yapan yerler → "isRelevant": true
-
-2. EĞER filtrelerde "🍷 Alkol: Non-Alcoholic" VARSA:
-   → Mekan tipi "bar", "pub", "nightclub", "wine_bar", "liquor_store" içeriyorsa → MUTLAKA "isRelevant": false
-   → Sadece "cafe", "coffee_shop", "bakery", "tea_house" gibi alkolsüz yerler → "isRelevant": true
-
-3. EĞER filtrelerde "🍷 Alkol: Any" VARSA veya alkol filtresi YOK ise:
-   → Tüm mekan tipleri kabul edilir
-
-=== SİGARA FİLTRESİ KURALLARI ===
-
-4. EĞER filtrelerde "🚬 Sigara: Non-Smoking" VARSA:
-   → Mekanda sigara içilebiliyorsa → "isRelevant": false
-   → Mekan kapalı ve smokefree ise → "isRelevant": true
-
-5. EĞER filtrelerde "🚬 Sigara: Allowed" VARSA:
-   → Mekanda sigara içilemiyorsa → "isRelevant": false
-
-6. EĞER filtrelerde "🚬 Sigara: Any" VARSA:
-   → Her türlü mekan kabul edilir
-
-=== ORTAM FİLTRESİ KURALLARI ===
-
-7. EĞER filtrelerde "🏠 Ortam: Indoor" VARSA:
-   → Tamamen açık hava mekanları → "isRelevant": false
-
-8. EĞER filtrelerde "🏠 Ortam: Outdoor" VARSA:
-   → Tamamen kapalı mekanlar → "isRelevant": false
-
-9. EĞER filtrelerde "🏠 Ortam: Any" VARSA:
-   → Her türlü mekan kabul edilir
-
-=== CANLI MÜZİK FİLTRESİ ===
-
-10. EĞER filtrelerde "🎵 Canlı Müzik: Yes" VARSA:
-    → Canlı müzik yoksa → "isRelevant": false
-
-11. EĞER filtrelerde "🎵 Canlı Müzik: No" VARSA:
-    → Canlı müzik varsa → "isRelevant": false
-
-12. EĞER filtrelerde "🎵 Canlı Müzik: Any" VARSA:
-    → Her türlü mekan kabul edilir
-
-=== KATEGORİ UYGUNLUĞU ===
-
-- "İlk Buluşma": cafe, restaurant, bistro, wine_bar uygun → nightclub, gym uygun değil
-- "Arkadaşlarla Takılma": bar, pub, restaurant, cafe uygun → hospital, bank uygun değil
-- "İş Toplantısı": cafe, restaurant, hotel_bar uygun → nightclub, spa uygun değil
-
-=== ÇIKTI FORMATI ===
-
-Yukarıdaki FİLTRE KURALLARINI kontrol ettikten sonra JSON formatında döndür:
-
-{{
-    "isRelevant": true/false,
-    "description": "Mekan açıklaması (Türkçe, 2 cümle)",
-    "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
-    "noiseLevel": 0-100,
-    "matchScore": 0-100,
-    "metrics": {{
-        "ambiance": 0-100,
-        "accessibility": 0-100,
-        "popularity": 0-100
-    }}
-}}
-
-ÖNEMLİ: Eğer ALKOL FİLTRESİ ihlal edildiyse (örn: "Alcoholic" ama mekan cafe), MUTLAKA "isRelevant": false döndür.
-
-SADECE JSON döndür, başka hiçbir şey yazma.
-                """
+SADECE JSON, başka bir şey yazma."""
 
                 model = get_genai_model()
                 if not model:
