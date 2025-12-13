@@ -179,11 +179,27 @@ def generate_local_festivals(location, filters):
     """Yerel Festivaller kategorisi için festival ve etkinlik listesi"""
     import json
     import sys
-    from datetime import datetime
+    from datetime import datetime, timedelta
 
     city = location['city']
-    current_month = datetime.now().strftime("%B")
-    current_year = datetime.now().year
+    today = datetime.now()
+    current_date = today.strftime("%d %B %Y")  # "13 December 2024"
+
+    # dateRange filtresine göre tarih aralığını belirle
+    date_range = filters.get('dateRange', 'Any')
+
+    if date_range == 'Tonight':
+        date_constraint = f"SADECE BUGÜN ({current_date}) olan etkinlikleri listele."
+        end_date = today
+    elif date_range == 'Next7Days':
+        end_date = today + timedelta(days=7)
+        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki (7 gün içindeki) etkinlikleri listele."
+    elif date_range == 'Next30Days':
+        end_date = today + timedelta(days=30)
+        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki (30 gün içindeki) etkinlikleri listele."
+    else:  # Any
+        end_date = today + timedelta(days=180)
+        date_constraint = f"{current_date} ile {end_date.strftime('%d %B %Y')} arasındaki (6 ay içindeki) etkinlikleri listele."
 
     model = get_genai_model()
     if not model:
@@ -196,7 +212,11 @@ def generate_local_festivals(location, filters):
         festival_prompt = f"""
 {city} ve çevresinde yaklaşan festivaller ve etkinlikleri listele.
 
-Şu anki tarih: {current_month} {current_year}
+BUGÜNÜN TARİHİ: {current_date}
+
+TARİH KURALI (ÇOK ÖNEMLİ!):
+{date_constraint}
+GEÇMİŞ TARİHLİ veya BELİRTİLEN ARALIK DIŞINDA FESTİVAL LİSTELEME!
 
 Festival türleri:
 - Gastronomi festivalleri (yemek, şarap, zeytinyağı vb.)
@@ -205,7 +225,7 @@ Festival türleri:
 - Hasat festivalleri
 - Yerel geleneksel festivaller
 
-EN AZ 12 FESTİVAL LİSTELE. Önümüzdeki 6 ay içindeki etkinlikleri dahil et.
+EN AZ 12 FESTİVAL LİSTELE.
 
 JSON ARRAY formatında döndür. Her festival:
 {{"id": "festival_1", "name": "Festival Adı", "description": "2 cümle açıklama - ne tür festival, ne yapılıyor", "imageUrl": "https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=800", "category": "Yerel Festivaller", "vibeTags": ["#Festival", "#Gastronomi", "#YerelLezzet"], "address": "Festival lokasyonu, {city}", "priceRange": "$$", "googleRating": 4.5, "noiseLevel": 65, "matchScore": 88, "googleMapsUrl": "", "isEvent": true, "eventDate": "15-17 Ocak 2025", "ticketUrl": "", "metrics": {{"ambiance": 85, "accessibility": 80, "popularity": 90}}}}
@@ -213,6 +233,7 @@ JSON ARRAY formatında döndür. Her festival:
 SADECE JSON ARRAY döndür. Minimum 12 festival."""
 
         print(f"🎪 Yerel Festivaller araması: {city}", file=sys.stderr, flush=True)
+        print(f"📅 Tarih filtresi: {date_range} -> {date_constraint}", file=sys.stderr, flush=True)
 
         response = model.generate_content(festival_prompt)
         response_text = response.text.strip()
