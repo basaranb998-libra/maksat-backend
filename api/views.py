@@ -188,15 +188,15 @@ def generate_local_festivals(location, filters):
     # dateRange filtresine göre tarih aralığını belirle
     date_range = filters.get('dateRange', 'Any')
 
-    if date_range == 'Tonight':
-        date_constraint = f"SADECE BUGÜN ({current_date}) olan etkinlikleri listele."
-        end_date = today
-    elif date_range == 'Next7Days':
+    if date_range == 'ThisWeek':
         end_date = today + timedelta(days=7)
-        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki (7 gün içindeki) etkinlikleri listele."
-    elif date_range == 'Next30Days':
+        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki (bu hafta içindeki) etkinlikleri listele."
+    elif date_range == 'ThisMonth':
         end_date = today + timedelta(days=30)
-        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki (30 gün içindeki) etkinlikleri listele."
+        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki (bu ay içindeki) etkinlikleri listele."
+    elif date_range == 'Next6Months':
+        end_date = today + timedelta(days=180)
+        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki (6 ay içindeki) etkinlikleri listele."
     else:  # Any
         end_date = today + timedelta(days=180)
         date_constraint = f"{current_date} ile {end_date.strftime('%d %B %Y')} arasındaki (6 ay içindeki) etkinlikleri listele."
