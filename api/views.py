@@ -293,7 +293,7 @@ def generate_venues(request):
                 'Adrenalin': 'adventure sports extreme',
                 'Spor': 'gym fitness yoga studio',
                 'Fine Dining': 'fine dining restaurant wine bar',
-                'Michelin Yıldızlı': 'michelin star restaurant fine dining',
+                'Michelin Yıldızlı': 'fine dining gourmet restaurant luxury upscale',
             }
         elif alcohol_filter == 'Non-Alcoholic':
             # Alkolsüz mekan seçilirse SADECE cafe, bakery, coffee shop ara
@@ -320,7 +320,7 @@ def generate_venues(request):
                 'Adrenalin': 'adventure sports extreme activities',
                 'Spor': 'gym fitness yoga studio pilates',
                 'Fine Dining': 'fine dining restaurant',
-                'Michelin Yıldızlı': 'michelin star restaurant',
+                'Michelin Yıldızlı': 'fine dining gourmet restaurant upscale',
             }
         else:
             # Any seçilirse her türlü mekan (varsayılan)
@@ -347,7 +347,7 @@ def generate_venues(request):
                 'Adrenalin': 'adventure sports extreme activities outdoor',
                 'Spor': 'gym fitness yoga studio pilates wellness',
                 'Fine Dining': 'fine dining restaurant upscale gourmet',
-                'Michelin Yıldızlı': 'michelin star restaurant award winning chef',
+                'Michelin Yıldızlı': 'fine dining gourmet restaurant luxury upscale tasting menu',
             }
 
         # Kategori ve filtrelere göre arama sorgusu oluştur
