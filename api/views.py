@@ -111,6 +111,83 @@ Toplam {duration * 6} aktivite döndür. SADECE JSON ARRAY, başka açıklama yo
         )
 
 
+def generate_michelin_restaurants(location, filters):
+    """Michelin Yıldızlı kategorisi için Michelin Guide'dan veri çekme"""
+    import json
+    import sys
+
+    city = location['city']
+    city_slug = city.lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+
+    model = get_genai_model()
+    if not model:
+        return Response(
+            {'error': 'Gemini API key eksik'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+    try:
+        # Gemini'ye Michelin Guide bilgisi ile restoran listesi oluşturmasını iste
+        michelin_prompt = f"""
+Sen Türkiye'deki Michelin Guide restoranları konusunda uzman bir gastronomi danışmanısın.
+
+{city} şehrindeki Michelin Guide'da yer alan restoranları listele.
+Michelin yıldızlı, Bib Gourmand veya Michelin tavsiyeli restoranlar olabilir.
+
+Her restoran için JSON formatında şu bilgileri ver:
+- id: benzersiz id (michelin_1, michelin_2...)
+- name: Restoran adı
+- description: 2 cümle Türkçe açıklama (mutfak tarzı, öne çıkan özellikler)
+- imageUrl: "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800" (fine dining görseli)
+- category: "Michelin Yıldızlı"
+- vibeTags: 3 hashtag ["#MichelinGuide", "#FineDining", "#GurmeRestoran"]
+- address: Tam adres ({city}, Türkiye)
+- priceRange: "$$$" veya "$$$$"
+- googleRating: 4.5-5.0 arası
+- noiseLevel: 25-45 arası (fine dining genelde sessiz)
+- matchScore: 85-98 arası
+- googleMapsUrl: "" (boş bırak, sonra dolduracağız)
+- michelinStatus: "1 Yıldız", "2 Yıldız", "3 Yıldız", "Bib Gourmand" veya "Michelin Tavsiyeli"
+- metrics: {{"ambiance": 90, "accessibility": 85, "popularity": 95}}
+
+{city} için bilinen TÜM Michelin Guide restoranlarını listele.
+Eğer {city}'de Michelin restoranı yoksa veya az ise, en yakın büyük şehirdeki (İstanbul, Ankara, İzmir) Michelin restoranlarını da öner.
+
+SADECE JSON ARRAY döndür, başka açıklama yazma.
+"""
+
+        print(f"🍽️ Michelin Guide araması: {city}", file=sys.stderr, flush=True)
+
+        response = model.generate_content(michelin_prompt)
+        response_text = response.text.strip()
+
+        # JSON parse et
+        if '```json' in response_text:
+            response_text = response_text.split('```json')[1].split('```')[0].strip()
+        elif '```' in response_text:
+            response_text = response_text.split('```')[1].split('```')[0].strip()
+
+        restaurants = json.loads(response_text)
+
+        # Google Maps URL ekle
+        for restaurant in restaurants:
+            search_query = urllib.parse.quote(f"{restaurant['name']} {city} restaurant")
+            restaurant['googleMapsUrl'] = f"https://www.google.com/maps/search/?api=1&query={search_query}"
+
+        print(f"✅ {len(restaurants)} Michelin restoran bulundu", file=sys.stderr, flush=True)
+
+        return Response(restaurants, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"❌ Michelin restaurant generation error: {e}", file=sys.stderr, flush=True)
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
+        return Response(
+            {'error': f'Michelin restoranları getirilirken hata: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 def generate_mock_venues(category, location, filters):
     """Mock venue data generator"""
     import random
@@ -264,7 +341,11 @@ def generate_venues(request):
             # Tatil kategorisi için deneyim bazlı öneri sistemi
             return generate_vacation_experiences(location, trip_duration, filters)
 
-        # Kategori bazlı query mapping (Tatil hariç)
+        # Michelin Yıldızlı kategorisi için özel işlem
+        if category['name'] == 'Michelin Yıldızlı':
+            return generate_michelin_restaurants(location, filters)
+
+        # Kategori bazlı query mapping (Tatil ve Michelin hariç)
         # ALKOL FİLTRESİNE GÖRE DİNAMİK QUERY OLUŞTUR
         alcohol_filter = filters.get('alcohol', 'Any')
 
