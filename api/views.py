@@ -424,6 +424,9 @@ def generate_venues(request):
                 if photo_name:
                     photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?key={settings.GOOGLE_MAPS_API_KEY}&maxWidthPx=800"
 
+            # Google Maps URL - place_id ile direkt link
+            google_maps_url = f"https://www.google.com/maps/place/?q=place_id:{place_id}"
+
             # Fiyat aralığı (yeni API PRICE_LEVEL_* formatı)
             price_level_str = place.get('priceLevel', 'PRICE_LEVEL_MODERATE')
             price_level_map = {
@@ -535,6 +538,7 @@ SADECE JSON, başka bir şey yazma."""
                     'googleRating': place_rating if place_rating > 0 else 4.0,
                     'noiseLevel': ai_data.get('noiseLevel', 50),
                     'matchScore': ai_data.get('matchScore', 75),
+                    'googleMapsUrl': google_maps_url,
                     'metrics': ai_data.get('metrics', {
                         'ambiance': 75,
                         'accessibility': 80,
@@ -559,6 +563,7 @@ SADECE JSON, başka bir şey yazma."""
                     'googleRating': place_rating if place_rating > 0 else 4.0,
                     'noiseLevel': 50,
                     'matchScore': 75,
+                    'googleMapsUrl': google_maps_url,
                     'metrics': {
                         'ambiance': 75,
                         'accessibility': 80,
