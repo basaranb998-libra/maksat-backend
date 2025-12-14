@@ -80,6 +80,16 @@ class FiltersSerializer(serializers.Serializer):
     budget = serializers.CharField(required=False)
     vibes = serializers.ListField(child=serializers.CharField(), required=False, default=list)
     amenities = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    # Vibe filters
+    environment = serializers.CharField(required=False)
+    smoking = serializers.CharField(required=False)
+    liveMusic = serializers.CharField(required=False)
+    alcohol = serializers.CharField(required=False)
+    # Event filters
+    dateRange = serializers.CharField(required=False)
+    musicGenre = serializers.CharField(required=False)
+    performanceGenre = serializers.CharField(required=False)
+    sportType = serializers.CharField(required=False)
 
 
 class VenueGenerateSerializer(serializers.Serializer):

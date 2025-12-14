@@ -176,30 +176,464 @@ SADECE JSON ARRAY döndür. Minimum 15 restoran."""
 
 
 def generate_local_festivals(location, filters):
-    """Yerel Festivaller kategorisi için festival ve etkinlik listesi"""
+    """Yerel Festivaller kategorisi için gerçek festival ve etkinlik listesi - Google Search grounding ile"""
     import json
     import sys
+    import re
     from datetime import datetime, timedelta
+    from google import genai
+    from google.genai import types
 
     city = location['city']
     today = datetime.now()
-    current_date = today.strftime("%d %B %Y")  # "13 December 2024"
+    current_date = today.strftime("%d %B %Y")
+    current_date_iso = today.strftime("%Y-%m-%d")
+    current_year = today.year
 
     # dateRange filtresine göre tarih aralığını belirle
     date_range = filters.get('dateRange', 'Any')
 
-    if date_range == 'ThisWeek':
+    if date_range == 'Today':
+        end_date = today
+        search_date = "bugün"
+        date_constraint = f"SADECE BUGÜN ({current_date}) devam eden veya başlayan etkinlikleri listele."
+        end_date_iso = today.strftime("%Y-%m-%d")
+    elif date_range == 'ThisWeek':
         end_date = today + timedelta(days=7)
-        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki (bu hafta içindeki) etkinlikleri listele."
+        search_date = "bu hafta"
+        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasında başlayan veya devam eden etkinlikleri listele. Bu tarih aralığı DIŞINDA kalan festivalleri LİSTELEME!"
+        end_date_iso = end_date.strftime("%Y-%m-%d")
     elif date_range == 'ThisMonth':
         end_date = today + timedelta(days=30)
-        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki (bu ay içindeki) etkinlikleri listele."
-    elif date_range == 'Next6Months':
-        end_date = today + timedelta(days=180)
-        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki (6 ay içindeki) etkinlikleri listele."
+        search_date = "bu ay"
+        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasında başlayan veya devam eden etkinlikleri listele. Bu tarih aralığı DIŞINDA kalan festivalleri LİSTELEME!"
+        end_date_iso = end_date.strftime("%Y-%m-%d")
     else:  # Any
-        end_date = today + timedelta(days=180)
-        date_constraint = f"{current_date} ile {end_date.strftime('%d %B %Y')} arasındaki (6 ay içindeki) etkinlikleri listele."
+        end_date = today + timedelta(days=90)
+        search_date = "yaklaşan"
+        date_constraint = f"{current_date} ile {end_date.strftime('%d %B %Y')} arasında başlayan veya devam eden etkinlikleri listele."
+        end_date_iso = end_date.strftime("%Y-%m-%d")
+
+    if not settings.GEMINI_API_KEY:
+        return Response(
+            {'error': 'Gemini API key eksik'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+    try:
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+        print(f"🎪 Yerel Festivaller (Google Search): {city} - {search_date} ({date_range})", file=sys.stderr, flush=True)
+        print(f"📅 Tarih aralığı: {current_date_iso} -> {end_date_iso}", file=sys.stderr, flush=True)
+
+        festival_prompt = f"""
+{city} şehrinde {search_date} düzenlenecek festival ve etkinlikleri internetten ara ve listele.
+
+BUGÜNÜN TARİHİ: {current_date} ({current_year})
+TARİH FİLTRESİ (ÇOK ÖNEMLİ!): {date_constraint}
+
+KURALLAR:
+1. Başlangıç tarihi {end_date.strftime('%d %B %Y')} tarihinden SONRA olan festivalleri LİSTELEME
+2. Bitiş tarihi {current_date} tarihinden ÖNCE olan (bitmiş) festivalleri LİSTELEME
+3. Şu an devam eden festivalleri dahil et
+4. startDate alanı ZORUNLU - ISO formatında (YYYY-MM-DD) festivalin başlangıç tarihi
+
+ARANACAK ETKİNLİK TÜRLERİ (SADECE BUNLAR):
+- Yılbaşı festivalleri ve Christmas etkinlikleri
+- Gastronomi festivalleri (yemek, şarap, zeytinyağı vb.)
+- Müzik festivalleri ve konserler
+- Kültür ve sanat festivalleri (tiyatro, sergi, film vb.)
+- Yerel şenlikler ve halk festivalleri (çiçek, hasat vb.)
+- Alışveriş fuarları ve outlet festivalleri
+
+HARİÇ TUTULACAK ETKİNLİKLER (BUNLARI LİSTELEME!):
+- Genel Kurul toplantıları (oda, dernek, şirket vb.)
+- Kongre ve konferanslar
+- İş toplantıları ve seminerleri
+- Resmi törenler ve açılışlar
+- Spor müsabakaları ve maçlar
+- Eğitim etkinlikleri ve workshoplar
+
+JSON ARRAY formatında döndür. Her festival için:
+{{"id": "festival_1", "name": "Festival Adı", "description": "Açıklama", "imageUrl": "https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=800", "category": "Yerel Festivaller", "vibeTags": ["#Festival"], "address": "Mekan, {city}", "priceRange": "$", "googleRating": 4.5, "noiseLevel": 65, "matchScore": 88, "googleMapsUrl": "", "isEvent": true, "eventDate": "9-14 Aralık 2025", "startDate": "2025-12-09", "endDate": "2025-12-14", "ticketUrl": "", "festivalType": "Yılbaşı", "metrics": {{"ambiance": 85, "accessibility": 80, "popularity": 90}}}}
+
+SADECE JSON ARRAY döndür."""
+
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=festival_prompt,
+            config=types.GenerateContentConfig(
+                tools=[
+                    types.Tool(
+                        google_search=types.GoogleSearch()
+                    )
+                ]
+            )
+        )
+
+        response_text = response.text.strip()
+        print(f"📝 Response length: {len(response_text)}", file=sys.stderr, flush=True)
+
+        # JSON parse et
+        if '```json' in response_text:
+            response_text = response_text.split('```json')[1].split('```')[0].strip()
+        elif '```' in response_text:
+            response_text = response_text.split('```')[1].split('```')[0].strip()
+
+        if not response_text.startswith('['):
+            start_idx = response_text.find('[')
+            end_idx = response_text.rfind(']')
+            if start_idx != -1 and end_idx != -1:
+                response_text = response_text[start_idx:end_idx + 1]
+
+        festivals = json.loads(response_text)
+
+        # Tarih bazlı filtreleme ve sıralama
+        def parse_date(date_str):
+            """Tarih string'ini datetime'a çevir"""
+            if not date_str:
+                return None
+            try:
+                # ISO format: 2025-12-09
+                return datetime.strptime(date_str, "%Y-%m-%d")
+            except:
+                return None
+
+        def extract_start_date_from_event_date(event_date):
+            """eventDate'den başlangıç tarihini çıkar: '9-14 Aralık 2025' -> '2025-12-09'"""
+            if not event_date:
+                return None
+            try:
+                # Türkçe ay isimleri
+                months_tr = {
+                    'ocak': 1, 'şubat': 2, 'mart': 3, 'nisan': 4, 'mayıs': 5, 'haziran': 6,
+                    'temmuz': 7, 'ağustos': 8, 'eylül': 9, 'ekim': 10, 'kasım': 11, 'aralık': 12
+                }
+                event_date_lower = event_date.lower()
+
+                # Yıl bul
+                year_match = re.search(r'20\d{2}', event_date)
+                year = int(year_match.group()) if year_match else current_year
+
+                # Ay bul
+                month = None
+                for month_name, month_num in months_tr.items():
+                    if month_name in event_date_lower:
+                        month = month_num
+                        break
+
+                if not month:
+                    return None
+
+                # Gün bul (ilk sayı)
+                day_match = re.search(r'(\d{1,2})', event_date)
+                day = int(day_match.group(1)) if day_match else 1
+
+                return datetime(year, month, day)
+            except:
+                return None
+
+        # Kurumsal/bürokratik etkinlikleri filtrelemek için anahtar kelimeler
+        excluded_keywords = [
+            'genel kurul', 'kongre', 'konferans', 'seminer', 'toplantı',
+            'açılış töreni', 'oda ', 'odası', 'dernek', 'birlik',
+            'workshop', 'eğitim', 'kurs', 'sınav', 'miting',
+            'meclis', 'belediye meclis'
+        ]
+
+        filtered_festivals = []
+        for festival in festivals:
+            # Kurumsal etkinlikleri ele
+            festival_name_lower = festival.get('name', '').lower()
+            is_excluded = any(keyword in festival_name_lower for keyword in excluded_keywords)
+            if is_excluded:
+                print(f"⏭️ Kurumsal etkinlik elendi: {festival.get('name')}", file=sys.stderr, flush=True)
+                continue
+
+            # startDate varsa kullan, yoksa eventDate'den çıkar
+            start_date = parse_date(festival.get('startDate'))
+            if not start_date:
+                start_date = extract_start_date_from_event_date(festival.get('eventDate'))
+
+            # endDate varsa kullan
+            end_date_fest = parse_date(festival.get('endDate'))
+            if not end_date_fest:
+                # eventDate'den bitiş tarihini çıkarmaya çalış (örn: "9-14 Aralık" -> 14)
+                event_date = festival.get('eventDate', '')
+                end_match = re.search(r'-(\d{1,2})', event_date)
+                if end_match and start_date:
+                    try:
+                        end_day = int(end_match.group(1))
+                        end_date_fest = start_date.replace(day=end_day)
+                    except:
+                        end_date_fest = start_date
+
+            # Filtreleme: Bitmiş festivalleri çıkar
+            if end_date_fest and end_date_fest.date() < today.date():
+                print(f"⏭️ Bitmiş festival atlandı: {festival.get('name')} (bitiş: {end_date_fest})", file=sys.stderr, flush=True)
+                continue
+
+            # Filtreleme: Seçilen tarih aralığı dışındakileri çıkar
+            if start_date and start_date.date() > end_date.date():
+                print(f"⏭️ Tarih aralığı dışında: {festival.get('name')} (başlangıç: {start_date})", file=sys.stderr, flush=True)
+                continue
+
+            # Sıralama için sort_date ekle
+            festival['_sort_date'] = start_date or datetime(2099, 12, 31)
+            filtered_festivals.append(festival)
+
+        # Başlangıç tarihine göre sırala (en erken başlayan üstte)
+        filtered_festivals.sort(key=lambda x: x['_sort_date'])
+
+        # _sort_date'i temizle ve Google Maps URL ekle
+        for festival in filtered_festivals:
+            del festival['_sort_date']
+            search_query = urllib.parse.quote(f"{festival['name']} {city} {current_year}")
+            festival['googleMapsUrl'] = f"https://www.google.com/maps/search/?api=1&query={search_query}"
+
+        print(f"✅ {len(filtered_festivals)} festival bulundu (filtreleme sonrası)", file=sys.stderr, flush=True)
+
+        return Response(filtered_festivals, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"❌ Festival generation error: {e}", file=sys.stderr, flush=True)
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
+        return Response(
+            {'error': f'Festivaller getirilirken hata: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+def generate_concerts(location, filters):
+    """Konserler kategorisi için canlı müzik etkinlikleri - Google Search grounding ile"""
+    import json
+    import sys
+    import re
+    from datetime import datetime, timedelta
+    from google import genai
+    from google.genai import types
+
+    city = location['city']
+    today = datetime.now()
+    current_date = today.strftime("%d %B %Y")
+    current_date_iso = today.strftime("%Y-%m-%d")
+    current_year = today.year
+
+    # dateRange filtresine göre tarih aralığını belirle
+    date_range = filters.get('dateRange', 'Any')
+    music_genre = filters.get('musicGenre', 'Any')
+
+    if date_range == 'Today':
+        end_date = today
+        search_date = "bugün"
+        date_constraint = f"SADECE BUGÜN ({current_date}) olan konserleri listele."
+        end_date_iso = today.strftime("%Y-%m-%d")
+    elif date_range == 'ThisWeek':
+        end_date = today + timedelta(days=7)
+        search_date = "bu hafta"
+        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki konserleri listele."
+        end_date_iso = end_date.strftime("%Y-%m-%d")
+    elif date_range == 'ThisMonth':
+        end_date = today + timedelta(days=30)
+        search_date = "bu ay"
+        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki konserleri listele."
+        end_date_iso = end_date.strftime("%Y-%m-%d")
+    else:  # Any
+        end_date = today + timedelta(days=60)
+        search_date = "yaklaşan"
+        date_constraint = f"{current_date} ile {end_date.strftime('%d %B %Y')} arasındaki konserleri listele."
+        end_date_iso = end_date.strftime("%Y-%m-%d")
+
+    # Müzik türü filtresi
+    genre_search = ""
+    genre_constraint = ""
+    if music_genre == 'Pop':
+        genre_search = "pop konserleri"
+        genre_constraint = "SADECE pop müzik konserleri listele."
+    elif music_genre == 'Rock':
+        genre_search = "rock konserleri"
+        genre_constraint = "SADECE rock müzik konserleri listele."
+    elif music_genre == 'Jazz':
+        genre_search = "jazz konserleri"
+        genre_constraint = "SADECE jazz konserleri listele."
+    elif music_genre == 'Electronic':
+        genre_search = "elektronik müzik DJ performansları"
+        genre_constraint = "SADECE elektronik müzik ve DJ performansları listele."
+    elif music_genre == 'Rap':
+        genre_search = "rap hip-hop konserleri"
+        genre_constraint = "SADECE rap ve hip-hop konserleri listele."
+    elif music_genre == 'Alternative':
+        genre_search = "alternatif indie konserleri"
+        genre_constraint = "SADECE alternatif ve indie müzik konserleri listele."
+    elif music_genre == 'Classical':
+        genre_search = "klasik müzik konserleri senfonik"
+        genre_constraint = "SADECE klasik müzik ve senfonik konserleri listele."
+    else:
+        genre_search = "konser canlı müzik"
+
+    if not settings.GEMINI_API_KEY:
+        return Response(
+            {'error': 'Gemini API key eksik'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+    try:
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+        print(f"🎸 Konserler (Google Search): {city} - {search_date} ({date_range}) - {music_genre}", file=sys.stderr, flush=True)
+        print(f"📅 Tarih aralığı: {current_date_iso} -> {end_date_iso}", file=sys.stderr, flush=True)
+
+        concert_prompt = f"""
+{city} şehrinde {search_date} gerçekleşecek {genre_search} etkinliklerini internetten ara ve listele.
+
+BUGÜNÜN TARİHİ: {current_date} ({current_year})
+TARİH FİLTRESİ (ÇOK ÖNEMLİ!): {date_constraint}
+{genre_constraint}
+
+KURALLAR:
+1. Başlangıç tarihi {end_date.strftime('%d %B %Y')} tarihinden SONRA olan konserleri LİSTELEME
+2. Bitiş tarihi {current_date} tarihinden ÖNCE olan (bitmiş) konserleri LİSTELEME
+3. startDate alanı ZORUNLU - ISO formatında (YYYY-MM-DD) konserin tarihi
+
+ARANACAK ETKİNLİK TÜRLERİ:
+- Solo sanatçı konserleri
+- Grup konserleri ve canlı performanslar
+- DJ setleri ve elektronik müzik partileri
+- Akustik performanslar
+- Açık hava konserleri
+- Festival konserleri
+
+BİLİNEN MEKANLAR:
+- İstanbul: Zorlu PSM, Volkswagen Arena, KüçükÇiftlik Park, Harbiye Açıkhava, Maximum Uniq, IF Performance Hall, Babylon, Dorock XL
+- Ankara: CSO Ada Ankara, CerModern, Bilkent ODEON, Congresium
+- İzmir: AASSM, Kültürpark Açıkhava, IF Performance Hall İzmir, Hangout PSM
+- Diğer: Beyrut Performance (Karşıyaka), Mask Club, Bohemian
+
+BİLET SATIŞ SİTELERİ:
+- Biletix: biletix.com
+- Passo: passo.com.tr
+- Biletinial: biletinial.com
+
+JSON ARRAY formatında döndür. Her konser için:
+{{"id": "concert_1", "name": "Sanatçı/Grup Adı Konseri", "description": "Kısa açıklama - sanatçı hakkında veya konser detayı", "imageUrl": "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800", "category": "Konserler", "vibeTags": ["#CanlıMüzik", "#Konser", "#Pop"], "address": "Mekan adresi, {city}", "priceRange": "$$", "googleRating": 4.5, "noiseLevel": 75, "matchScore": 90, "googleMapsUrl": "", "isEvent": true, "eventDate": "20 Aralık 2024, Cuma 21:00", "startDate": "2024-12-20", "ticketUrl": "https://biletix.com/...", "musicGenre": "Pop", "venue": "Mekan adı", "metrics": {{"ambiance": 85, "accessibility": 80, "popularity": 92}}}}
+
+SADECE JSON ARRAY döndür."""
+
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=concert_prompt,
+            config=types.GenerateContentConfig(
+                tools=[
+                    types.Tool(
+                        google_search=types.GoogleSearch()
+                    )
+                ]
+            )
+        )
+
+        response_text = response.text.strip()
+        print(f"📝 Response length: {len(response_text)}", file=sys.stderr, flush=True)
+
+        # JSON parse et
+        if '```json' in response_text:
+            response_text = response_text.split('```json')[1].split('```')[0].strip()
+        elif '```' in response_text:
+            response_text = response_text.split('```')[1].split('```')[0].strip()
+
+        if not response_text.startswith('['):
+            start_idx = response_text.find('[')
+            end_idx = response_text.rfind(']')
+            if start_idx != -1 and end_idx != -1:
+                response_text = response_text[start_idx:end_idx + 1]
+
+        concerts = json.loads(response_text)
+
+        # Tarih bazlı filtreleme ve sıralama
+        def parse_date(date_str):
+            if not date_str:
+                return None
+            try:
+                return datetime.strptime(date_str, "%Y-%m-%d")
+            except:
+                return None
+
+        def extract_start_date_from_event_date(event_date):
+            if not event_date:
+                return None
+            try:
+                months_tr = {
+                    'ocak': 1, 'şubat': 2, 'mart': 3, 'nisan': 4, 'mayıs': 5, 'haziran': 6,
+                    'temmuz': 7, 'ağustos': 8, 'eylül': 9, 'ekim': 10, 'kasım': 11, 'aralık': 12
+                }
+                event_date_lower = event_date.lower()
+                year_match = re.search(r'20\d{2}', event_date)
+                year = int(year_match.group()) if year_match else current_year
+                month = None
+                for month_name, month_num in months_tr.items():
+                    if month_name in event_date_lower:
+                        month = month_num
+                        break
+                if not month:
+                    return None
+                day_match = re.search(r'(\d{1,2})', event_date)
+                day = int(day_match.group(1)) if day_match else 1
+                return datetime(year, month, day)
+            except:
+                return None
+
+        filtered_concerts = []
+        for concert in concerts:
+            start_date = parse_date(concert.get('startDate'))
+            if not start_date:
+                start_date = extract_start_date_from_event_date(concert.get('eventDate'))
+
+            # Filtreleme: Bitmiş konserleri çıkar
+            if start_date and start_date.date() < today.date():
+                print(f"⏭️ Geçmiş konser atlandı: {concert.get('name')} ({start_date})", file=sys.stderr, flush=True)
+                continue
+
+            # Filtreleme: Seçilen tarih aralığı dışındakileri çıkar
+            if start_date and start_date.date() > end_date.date():
+                print(f"⏭️ Tarih aralığı dışında: {concert.get('name')} ({start_date})", file=sys.stderr, flush=True)
+                continue
+
+            concert['_sort_date'] = start_date or datetime(2099, 12, 31)
+            filtered_concerts.append(concert)
+
+        # Başlangıç tarihine göre sırala
+        filtered_concerts.sort(key=lambda x: x['_sort_date'])
+
+        # _sort_date'i temizle ve Google Maps URL ekle
+        for concert in filtered_concerts:
+            del concert['_sort_date']
+            venue_name = concert.get('venue', concert['name'])
+            search_query = urllib.parse.quote(f"{venue_name} {city} konser")
+            concert['googleMapsUrl'] = f"https://www.google.com/maps/search/?api=1&query={search_query}"
+
+        print(f"✅ {len(filtered_concerts)} konser bulundu (filtreleme sonrası)", file=sys.stderr, flush=True)
+
+        return Response(filtered_concerts, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"❌ Concert generation error: {e}", file=sys.stderr, flush=True)
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
+        return Response(
+            {'error': f'Konserler getirilirken hata: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+def generate_adrenaline_experiences(location, filters):
+    """Adrenalin kategorisi için deneyim bazlı öneri sistemi"""
+    import json
+    import sys
+
+    city = location['city']
+    districts = location.get('districts', [])
+    district = districts[0] if districts else None
+    location_query = f"{district}, {city}" if district else city
 
     model = get_genai_model()
     if not model:
@@ -209,33 +643,33 @@ def generate_local_festivals(location, filters):
         )
 
     try:
-        festival_prompt = f"""
-{city} ve çevresinde yaklaşan festivaller ve etkinlikleri listele.
+        adrenaline_prompt = f"""
+{location_query} ve çevresinde yapılabilecek adrenalin dolu deneyimleri listele.
 
-BUGÜNÜN TARİHİ: {current_date}
+Deneyim türleri (çeşitlilik olsun):
+- Yamaç paraşütü / Paragliding
+- Dalış / Tüplü dalış / Serbest dalış
+- Rafting / Kano / Kayak
+- Bungee jumping
+- Zipline / Tirolyen
+- Off-road / ATV / Safari turu
+- Uçuş deneyimi / Tandem atlayış
+- Tırmanış / Kaya tırmanışı
+- Sörf / Kitesurf / Windsurf
+- Dağ bisikleti
+- At binme / Safari
+- Go-kart / Karting
 
-TARİH KURALI (ÇOK ÖNEMLİ!):
-{date_constraint}
-GEÇMİŞ TARİHLİ veya BELİRTİLEN ARALIK DIŞINDA FESTİVAL LİSTELEME!
+{location_query} bölgesine uygun EN AZ 10 FARKLI DENEYİM öner. Bölgede popüler olan aktivitelere öncelik ver.
 
-Festival türleri:
-- Gastronomi festivalleri (yemek, şarap, zeytinyağı vb.)
-- Müzik festivalleri
-- Kültür ve sanat festivalleri
-- Hasat festivalleri
-- Yerel geleneksel festivaller
+JSON ARRAY formatında döndür. Her deneyim:
+{{"id": "adrenaline_1", "name": "Deneyim Adı", "description": "2-3 cümle açıklama - ne yapılıyor, nasıl bir deneyim", "imageUrl": "https://images.unsplash.com/photo-...", "category": "Adrenalin", "vibeTags": ["#Adrenalin", "#Macera", "#Doğa"], "address": "Aktivite lokasyonu, {city}", "priceRange": "$$", "googleRating": 4.6, "noiseLevel": 60, "matchScore": 90, "googleMapsUrl": "", "metrics": {{"ambiance": 85, "accessibility": 75, "popularity": 88}}}}
 
-EN AZ 12 FESTİVAL LİSTELE.
+SADECE JSON ARRAY döndür. Minimum 10 deneyim."""
 
-JSON ARRAY formatında döndür. Her festival:
-{{"id": "festival_1", "name": "Festival Adı", "description": "2 cümle açıklama - ne tür festival, ne yapılıyor", "imageUrl": "https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=800", "category": "Yerel Festivaller", "vibeTags": ["#Festival", "#Gastronomi", "#YerelLezzet"], "address": "Festival lokasyonu, {city}", "priceRange": "$$", "googleRating": 4.5, "noiseLevel": 65, "matchScore": 88, "googleMapsUrl": "", "isEvent": true, "eventDate": "15-17 Ocak 2025", "ticketUrl": "", "metrics": {{"ambiance": 85, "accessibility": 80, "popularity": 90}}}}
+        print(f"🏔️ Adrenalin deneyimleri araması: {location_query}", file=sys.stderr, flush=True)
 
-SADECE JSON ARRAY döndür. Minimum 12 festival."""
-
-        print(f"🎪 Yerel Festivaller araması: {city}", file=sys.stderr, flush=True)
-        print(f"📅 Tarih filtresi: {date_range} -> {date_constraint}", file=sys.stderr, flush=True)
-
-        response = model.generate_content(festival_prompt)
+        response = model.generate_content(adrenaline_prompt)
         response_text = response.text.strip()
 
         # JSON parse et
@@ -244,23 +678,363 @@ SADECE JSON ARRAY döndür. Minimum 12 festival."""
         elif '```' in response_text:
             response_text = response_text.split('```')[1].split('```')[0].strip()
 
-        festivals = json.loads(response_text)
+        experiences = json.loads(response_text)
 
         # Google Maps URL ekle
-        for festival in festivals:
-            search_query = urllib.parse.quote(f"{festival['name']} {city} festival")
-            festival['googleMapsUrl'] = f"https://www.google.com/maps/search/?api=1&query={search_query}"
+        for exp in experiences:
+            search_query = urllib.parse.quote(f"{exp['name']} {city}")
+            exp['googleMapsUrl'] = f"https://www.google.com/maps/search/?api=1&query={search_query}"
 
-        print(f"✅ {len(festivals)} festival bulundu", file=sys.stderr, flush=True)
+        print(f"✅ {len(experiences)} adrenalin deneyimi bulundu", file=sys.stderr, flush=True)
 
-        return Response(festivals, status=status.HTTP_200_OK)
+        return Response(experiences, status=status.HTTP_200_OK)
 
     except Exception as e:
-        print(f"❌ Festival generation error: {e}", file=sys.stderr, flush=True)
+        print(f"❌ Adrenaline experience generation error: {e}", file=sys.stderr, flush=True)
         import traceback
         print(traceback.format_exc(), file=sys.stderr, flush=True)
         return Response(
-            {'error': f'Festivaller getirilirken hata: {str(e)}'},
+            {'error': f'Adrenalin deneyimleri getirilirken hata: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+def generate_weekend_trip_experiences(location, filters):
+    """Hafta Sonu Gezintisi kategorisi için deneyim bazlı öneri sistemi"""
+    import json
+    import sys
+
+    city = location['city']
+    districts = location.get('districts', [])
+    district = districts[0] if districts else None
+    location_query = f"{district}, {city}" if district else city
+
+    model = get_genai_model()
+    if not model:
+        return Response(
+            {'error': 'Gemini API key eksik'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+    try:
+        weekend_prompt = f"""
+{location_query} ve çevresinde hafta sonu günübirlik gezilecek, görülecek yerleri listele.
+
+Deneyim türleri (çeşitlilik olsun):
+- Doğa yürüyüşü / Trekking rotaları
+- Tarihi köyler ve kasabalar
+- Şelale ve doğal güzellikler
+- Botanik bahçeleri / Tabiat parkları
+- Antik kentler ve ören yerleri
+- Bağ bozumu / Şarap rotaları
+- Göl kenarı piknik alanları
+- Manzara seyir noktaları
+- Termal kaplıcalar
+- El sanatları köyleri
+- Organik çiftlikler / Köy kahvaltısı
+- Bisiklet rotaları
+
+{location_query} bölgesinden günübirlik ulaşılabilir (max 2 saat mesafe) EN AZ 10 FARKLI DENEYİM öner.
+
+JSON ARRAY formatında döndür. Her deneyim:
+{{"id": "weekend_1", "name": "Deneyim/Yer Adı", "description": "2-3 cümle açıklama - ne görülür, ne yapılır, neden güzel", "imageUrl": "https://images.unsplash.com/photo-...", "category": "Hafta Sonu Gezintisi", "vibeTags": ["#HaftaSonu", "#Doğa", "#Gezi"], "address": "Lokasyon, İlçe", "priceRange": "$", "googleRating": 4.5, "noiseLevel": 30, "matchScore": 88, "googleMapsUrl": "", "metrics": {{"ambiance": 90, "accessibility": 80, "popularity": 85}}}}
+
+SADECE JSON ARRAY döndür. Minimum 10 deneyim."""
+
+        print(f"🌲 Hafta Sonu Gezintisi araması: {location_query}", file=sys.stderr, flush=True)
+
+        response = model.generate_content(weekend_prompt)
+        response_text = response.text.strip()
+
+        # JSON parse et
+        if '```json' in response_text:
+            response_text = response_text.split('```json')[1].split('```')[0].strip()
+        elif '```' in response_text:
+            response_text = response_text.split('```')[1].split('```')[0].strip()
+
+        experiences = json.loads(response_text)
+
+        # Google Maps URL ekle
+        for exp in experiences:
+            search_query = urllib.parse.quote(f"{exp['name']} {city}")
+            exp['googleMapsUrl'] = f"https://www.google.com/maps/search/?api=1&query={search_query}"
+
+        print(f"✅ {len(experiences)} hafta sonu deneyimi bulundu", file=sys.stderr, flush=True)
+
+        return Response(experiences, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"❌ Weekend trip generation error: {e}", file=sys.stderr, flush=True)
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
+        return Response(
+            {'error': f'Hafta sonu gezintileri getirilirken hata: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+def generate_performing_arts_events(location, filters):
+    """Sahne Sanatları kategorisi için tiyatro, stand-up, opera, bale etkinlikleri - Google Search grounding ile"""
+    import json
+    import sys
+    import re
+    from datetime import datetime, timedelta
+    from google import genai
+    from google.genai import types
+
+    city = location['city']
+    today = datetime.now()
+    current_date = today.strftime("%d %B %Y")
+    current_date_iso = today.strftime("%Y-%m-%d")
+    current_year = today.year
+
+    # dateRange filtresine göre tarih aralığını belirle
+    date_range = filters.get('dateRange', 'Any')
+    performance_genre = filters.get('performanceGenre', 'Any')
+
+    if date_range == 'Today':
+        end_date = today
+        search_date = "bugün"
+        date_constraint = f"SADECE BUGÜN ({current_date}) olan etkinlikleri listele."
+        end_date_iso = today.strftime("%Y-%m-%d")
+    elif date_range == 'ThisWeek':
+        end_date = today + timedelta(days=7)
+        search_date = "bu hafta"
+        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki etkinlikleri listele."
+        end_date_iso = end_date.strftime("%Y-%m-%d")
+    elif date_range == 'ThisMonth':
+        end_date = today + timedelta(days=30)
+        search_date = "bu ay"
+        date_constraint = f"SADECE {current_date} ile {end_date.strftime('%d %B %Y')} arasındaki etkinlikleri listele."
+        end_date_iso = end_date.strftime("%Y-%m-%d")
+    else:  # Any
+        end_date = today + timedelta(days=60)
+        search_date = "yaklaşan"
+        date_constraint = f"{current_date} ile {end_date.strftime('%d %B %Y')} arasındaki etkinlikleri listele."
+        end_date_iso = end_date.strftime("%Y-%m-%d")
+
+    # Tür filtresi
+    genre_search = ""
+    genre_constraint = ""
+    if performance_genre == 'Theater':
+        genre_search = "tiyatro oyunları"
+        genre_constraint = "SADECE tiyatro oyunları listele (dram, komedi, trajedi)."
+    elif performance_genre == 'Standup':
+        genre_search = "stand-up komedi gösterileri"
+        genre_constraint = "SADECE stand-up komedi gösterileri listele."
+    elif performance_genre == 'OperaBallet':
+        genre_search = "opera bale gösterileri"
+        genre_constraint = "SADECE opera ve bale gösterileri listele."
+    elif performance_genre == 'Musical':
+        genre_search = "müzikal gösteriler"
+        genre_constraint = "SADECE müzikal gösteriler listele."
+    elif performance_genre == 'Dance':
+        genre_search = "dans gösterileri"
+        genre_constraint = "SADECE dans gösterileri listele (modern dans, flamenko, vb.)."
+    else:
+        genre_search = "tiyatro stand-up opera bale müzikal"
+
+    if not settings.GEMINI_API_KEY:
+        return Response(
+            {'error': 'Gemini API key eksik'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+    try:
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+        print(f"🎭 Sahne Sanatları (Google Search): {city} - {search_date} ({date_range}) - {performance_genre}", file=sys.stderr, flush=True)
+        print(f"📅 Tarih aralığı: {current_date_iso} -> {end_date_iso}", file=sys.stderr, flush=True)
+
+        arts_prompt = f"""
+{city} şehrinde {search_date} gerçekleşecek {genre_search} etkinliklerini internetten ara ve listele.
+
+BUGÜNÜN TARİHİ: {current_date} ({current_year})
+TARİH FİLTRESİ (ÇOK ÖNEMLİ!): {date_constraint}
+{genre_constraint}
+
+KURALLAR:
+1. Başlangıç tarihi {end_date.strftime('%d %B %Y')} tarihinden SONRA olan etkinlikleri LİSTELEME
+2. Bitiş tarihi {current_date} tarihinden ÖNCE olan (bitmiş) etkinlikleri LİSTELEME
+3. startDate alanı ZORUNLU - ISO formatında (YYYY-MM-DD) etkinliğin tarihi
+
+ARANACAK ETKİNLİK TÜRLERİ:
+- Tiyatro oyunları (dram, komedi, trajedi)
+- Stand-up komedi gösterileri
+- Opera ve bale performansları
+- Müzikal gösterileri
+- Dans gösterileri (modern dans, flamenko, vb.)
+
+BİLİNEN MEKANLAR:
+- İstanbul: Zorlu PSM, DasDas, IKSV Salon, Maximum Uniq, Babylon, Harbiye Açıkhava, İstanbul Devlet Tiyatrosu, Şehir Tiyatroları, DOB, Caddebostan Kültür Merkezi, Moda Sahnesi, Uniq Hall
+- Ankara: CSO Ada Ankara, CerModern, Ankara Devlet Tiyatrosu, Bilkent ODEON
+- İzmir: AASSM, İzmir Devlet Tiyatrosu, Kültürpark Açıkhava, EBSO Konser Salonu, İzmir Sanat
+
+BİLET SATIŞ SİTELERİ:
+- Biletix: biletix.com
+- Passo: passo.com.tr
+- Biletinial: biletinial.com
+- Mobilet: mobilet.com
+
+JSON ARRAY formatında döndür. Her etkinlik için:
+{{"id": "arts_1", "name": "Gösteri Adı", "description": "Oyuncular veya kısa açıklama", "imageUrl": "https://images.unsplash.com/photo-1507676184212-d03ab07a01bf?w=800", "category": "Sahne Sanatları", "vibeTags": ["#Tiyatro", "#Komedi"], "address": "Mekan adresi, {city}", "priceRange": "$$", "googleRating": 4.5, "noiseLevel": 40, "matchScore": 90, "googleMapsUrl": "", "isEvent": true, "eventDate": "20 Aralık 2024, Cuma 20:30", "startDate": "2024-12-20", "ticketUrl": "https://biletix.com/...", "performanceType": "Tiyatro", "venue": "Mekan adı", "metrics": {{"ambiance": 90, "accessibility": 85, "popularity": 88}}}}
+
+SADECE JSON ARRAY döndür."""
+
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=arts_prompt,
+            config=types.GenerateContentConfig(
+                tools=[
+                    types.Tool(
+                        google_search=types.GoogleSearch()
+                    )
+                ]
+            )
+        )
+
+        response_text = response.text.strip()
+        print(f"📝 Response length: {len(response_text)}", file=sys.stderr, flush=True)
+        print(f"📝 Response preview: {response_text[:500]}...", file=sys.stderr, flush=True)
+
+        # JSON parse et
+        if '```json' in response_text:
+            response_text = response_text.split('```json')[1].split('```')[0].strip()
+        elif '```' in response_text:
+            response_text = response_text.split('```')[1].split('```')[0].strip()
+
+        if not response_text.startswith('['):
+            start_idx = response_text.find('[')
+            end_idx = response_text.rfind(']')
+            if start_idx != -1 and end_idx != -1:
+                response_text = response_text[start_idx:end_idx + 1]
+            else:
+                # JSON array bulunamadı - boş liste döndür
+                print(f"⚠️ JSON array bulunamadı, boş liste döndürülüyor", file=sys.stderr, flush=True)
+                return Response([], status=status.HTTP_200_OK)
+
+        try:
+            events = json.loads(response_text)
+        except json.JSONDecodeError as je:
+            print(f"⚠️ JSON parse hatası: {je}", file=sys.stderr, flush=True)
+            print(f"⚠️ Parsed text: {response_text[:500]}", file=sys.stderr, flush=True)
+
+            # Kesilmiş JSON'u kurtarmaya çalış
+            # Son tamamlanmış objeyi bul
+            events = []
+            depth = 0
+            in_string = False
+            escape_next = False
+            last_complete_idx = -1
+
+            for i, char in enumerate(response_text):
+                if escape_next:
+                    escape_next = False
+                    continue
+
+                if char == '\\':
+                    escape_next = True
+                    continue
+
+                if char == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+
+                if in_string:
+                    continue
+
+                if char == '{':
+                    depth += 1
+                elif char == '}':
+                    depth -= 1
+                    if depth == 0:
+                        last_complete_idx = i
+
+            if last_complete_idx > 0:
+                # Son tamamlanmış objeye kadar al
+                truncated_json = response_text[:last_complete_idx + 1] + ']'
+                try:
+                    events = json.loads(truncated_json)
+                    print(f"✅ Kesilmiş JSON kurtarıldı - {len(events)} etkinlik", file=sys.stderr, flush=True)
+                except json.JSONDecodeError as je2:
+                    print(f"⚠️ JSON kurtarma başarısız: {je2}", file=sys.stderr, flush=True)
+                    events = []
+
+            if not events:
+                return Response([], status=status.HTTP_200_OK)
+
+        # Tarih bazlı filtreleme ve sıralama
+        def parse_date(date_str):
+            if not date_str:
+                return None
+            try:
+                return datetime.strptime(date_str, "%Y-%m-%d")
+            except:
+                return None
+
+        def extract_start_date_from_event_date(event_date):
+            if not event_date:
+                return None
+            try:
+                months_tr = {
+                    'ocak': 1, 'şubat': 2, 'mart': 3, 'nisan': 4, 'mayıs': 5, 'haziran': 6,
+                    'temmuz': 7, 'ağustos': 8, 'eylül': 9, 'ekim': 10, 'kasım': 11, 'aralık': 12
+                }
+                event_date_lower = event_date.lower()
+                year_match = re.search(r'20\d{2}', event_date)
+                year = int(year_match.group()) if year_match else current_year
+                month = None
+                for month_name, month_num in months_tr.items():
+                    if month_name in event_date_lower:
+                        month = month_num
+                        break
+                if not month:
+                    return None
+                day_match = re.search(r'(\d{1,2})', event_date)
+                day = int(day_match.group(1)) if day_match else 1
+                return datetime(year, month, day)
+            except:
+                return None
+
+        filtered_events = []
+        for event in events:
+            start_date = parse_date(event.get('startDate'))
+            if not start_date:
+                start_date = extract_start_date_from_event_date(event.get('eventDate'))
+
+            # Filtreleme: Bitmiş etkinlikleri çıkar
+            if start_date and start_date.date() < today.date():
+                print(f"⏭️ Geçmiş etkinlik atlandı: {event.get('name')} ({start_date})", file=sys.stderr, flush=True)
+                continue
+
+            # Filtreleme: Seçilen tarih aralığı dışındakileri çıkar
+            if start_date and start_date.date() > end_date.date():
+                print(f"⏭️ Tarih aralığı dışında: {event.get('name')} ({start_date})", file=sys.stderr, flush=True)
+                continue
+
+            event['_sort_date'] = start_date or datetime(2099, 12, 31)
+            filtered_events.append(event)
+
+        # Başlangıç tarihine göre sırala
+        filtered_events.sort(key=lambda x: x['_sort_date'])
+
+        # _sort_date'i temizle ve Google Maps URL ekle
+        for event in filtered_events:
+            del event['_sort_date']
+            venue_name = event.get('venue', event['name'])
+            search_query = urllib.parse.quote(f"{venue_name} {city}")
+            event['googleMapsUrl'] = f"https://www.google.com/maps/search/?api=1&query={search_query}"
+
+        print(f"✅ {len(filtered_events)} sahne sanatları etkinliği bulundu (filtreleme sonrası)", file=sys.stderr, flush=True)
+
+        return Response(filtered_events, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"❌ Performing arts generation error: {e}", file=sys.stderr, flush=True)
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
+        return Response(
+            {'error': f'Sahne sanatları etkinlikleri getirilirken hata: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -325,7 +1099,7 @@ def generate_mock_venues(category, location, filters):
             'id': f"v{idx + 1}",
             'name': place_data['name'],
             'description': description,
-            'imageUrl': f"https://via.placeholder.com/800x600?text={place_data['name']}",
+            'imageUrl': 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800',
             'category': category['name'],
             'vibeTags': place_data['vibes'],
             'address': f"{place_data['name']}, {district}, {city}",
@@ -385,6 +1159,26 @@ def logout(request):
     return Response({'message': 'Başarıyla çıkış yapıldı'})
 
 
+def extract_website(url):
+    """Instagram ve sosyal medya linklerini website'den ayırır"""
+    if not url:
+        return ''
+    # Instagram, Facebook, Twitter linkleri website değil
+    social_media_domains = ['instagram.com', 'facebook.com', 'twitter.com', 'tiktok.com', 'youtube.com']
+    for domain in social_media_domains:
+        if domain in url.lower():
+            return ''
+    return url
+
+def extract_instagram(url):
+    """URL'den Instagram linkini çıkarır"""
+    if not url:
+        return ''
+    if 'instagram.com' in url.lower():
+        return url
+    return ''
+
+
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def generate_venues(request):
@@ -426,7 +1220,23 @@ def generate_venues(request):
         if category['name'] == 'Yerel Festivaller':
             return generate_local_festivals(location, filters)
 
-        # Kategori bazlı query mapping (Tatil, Michelin ve Festivaller hariç)
+        # Adrenalin kategorisi için özel işlem - deneyim bazlı
+        if category['name'] == 'Adrenalin':
+            return generate_adrenaline_experiences(location, filters)
+
+        # Hafta Sonu Gezintisi kategorisi için özel işlem - deneyim bazlı
+        if category['name'] == 'Hafta Sonu Gezintisi':
+            return generate_weekend_trip_experiences(location, filters)
+
+        # Sahne Sanatları kategorisi için özel işlem - etkinlik bazlı
+        if category['name'] == 'Sahne Sanatları':
+            return generate_performing_arts_events(location, filters)
+
+        # Konserler kategorisi için özel işlem - etkinlik bazlı
+        if category['name'] == 'Konserler':
+            return generate_concerts(location, filters)
+
+        # Kategori bazlı query mapping (Tatil, Michelin, Festivaller, Adrenalin, Hafta Sonu Gezintisi, Sahne Sanatları ve Konserler hariç)
         # ALKOL FİLTRESİNE GÖRE DİNAMİK QUERY OLUŞTUR
         alcohol_filter = filters.get('alcohol', 'Any')
 
@@ -510,6 +1320,7 @@ def generate_venues(request):
                 'Spor': 'gym fitness yoga studio pilates wellness',
                 'Fine Dining': 'fine dining restaurant upscale gourmet',
                 'Michelin Yıldızlı': 'fine dining gourmet restaurant luxury upscale tasting menu',
+                'Meyhane': 'meyhane restaurant turkish tavern rakı meze',
             }
 
         # Kategori ve filtrelere göre arama sorgusu oluştur
@@ -543,7 +1354,7 @@ def generate_venues(request):
                 headers = {
                     "Content-Type": "application/json",
                     "X-Goog-Api-Key": settings.GOOGLE_MAPS_API_KEY,
-                    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.photos,places.priceLevel,places.types,places.location"
+                    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours"
                 }
                 payload = {
                     "textQuery": f"{search_query} in {search_location}, Turkey",
@@ -581,6 +1392,7 @@ def generate_venues(request):
             place_name = place.get('displayName', {}).get('text', '')
             place_address = place.get('formattedAddress', '')
             place_rating = place.get('rating', 0)
+            place_review_count = place.get('userRatingCount', 0)
             place_types = place.get('types', [])
 
             # ===== İLÇE FİLTRESİ: Seçilen ilçeye ait olmayan mekanları atla =====
@@ -660,32 +1472,116 @@ def generate_venues(request):
                     print(f"❌ ALKOLSÜZ REJECT (isim) - {place_name}: alkollü isimli", file=sys.stderr, flush=True)
                     continue
 
+            # ===== PAVYON/KONSOMATRIS FİLTRESİ =====
+            # Eğlence & Parti kategorisi için uygunsuz mekanları filtrele
+            if category['name'] == 'Eğlence & Parti':
+                pavyon_keywords = [
+                    'pavyon', 'konsomatris', 'gazino', 'casino', 'kabare', 'cabaret',
+                    'gece alemi', 'eglence merkezi', 'dans bar', 'show bar',
+                    'strip', 'striptiz', 'hostess', 'escort', 'masaj salonu',
+                    'gentlemen', 'club 18', 'club18', 'adult', 'yetiskin'
+                ]
+
+                # İsimde veya types'da pavyon tarzı kelimeler varsa filtrele
+                is_pavyon_name = any(keyword in place_name_lower for keyword in pavyon_keywords)
+                is_pavyon_type = any(keyword in place_types_str for keyword in pavyon_keywords)
+
+                if is_pavyon_name or is_pavyon_type:
+                    print(f"❌ PAVYON REJECT - {place_name}: uygunsuz mekan", file=sys.stderr, flush=True)
+                    continue
+
+                # ===== RATING & REVIEW COUNT FİLTRESİ =====
+                # Eğlence & Parti kategorisi için düşük puanlı ve az yorumlu mekanları filtrele
+                if place_rating < 4.6:
+                    print(f"❌ RATING REJECT - {place_name}: rating={place_rating} < 4.6", file=sys.stderr, flush=True)
+                    continue
+
+                if place_review_count < 15:
+                    print(f"❌ REVIEW REJECT - {place_name}: reviews={place_review_count} < 15", file=sys.stderr, flush=True)
+                    continue
+
+            # ===== MEYHANE KATEGORİSİ FİLTRESİ =====
+            # Meyhane kategorisinde SADECE isminde "meyhane" geçen mekanları kabul et
+            if category['name'] == 'Meyhane':
+                meyhane_keywords = ['meyhane', 'meyhanesi']
+                is_meyhane = any(keyword in place_name_lower for keyword in meyhane_keywords)
+
+                if not is_meyhane:
+                    print(f"❌ MEYHANE REJECT - {place_name}: isminde 'meyhane' yok", file=sys.stderr, flush=True)
+                    continue
+
+            # Google Reviews'ı parse et (max 10, en yeniden eskiye sıralı)
+            google_reviews = []
+            raw_reviews = place.get('reviews', [])
+            # publishTime'a göre en yeniden eskiye sırala
+            sorted_reviews = sorted(
+                raw_reviews,
+                key=lambda r: r.get('publishTime', ''),
+                reverse=True
+            )[:10]  # Max 10 yorum
+            for review in sorted_reviews:
+                google_reviews.append({
+                    'authorName': review.get('authorAttribution', {}).get('displayName', 'Anonim'),
+                    'rating': review.get('rating', 5),
+                    'text': review.get('text', {}).get('text', ''),
+                    'relativeTime': review.get('relativePublishTimeDescription', ''),
+                    'profilePhotoUrl': review.get('authorAttribution', {}).get('photoUri', ''),
+                    'publishTime': review.get('publishTime', '')
+                })
+
+            # Çalışma saatleri - tüm hafta
+            opening_hours = place.get('currentOpeningHours', {})
+            hours_list = opening_hours.get('weekdayDescriptions', [])  # 7 günlük liste
+            hours_text = hours_list[0] if hours_list else ''  # Bugünün saati (backward compat)
+
             # Filtreyi geçen mekanları topla
             filtered_places.append({
                 'idx': idx,
                 'name': place_name,
                 'address': place_address,
                 'rating': place_rating,
+                'review_count': place_review_count,
                 'types': place_types,
                 'photo_url': photo_url,
                 'google_maps_url': google_maps_url,
-                'price_range': price_range
+                'price_range': price_range,
+                'google_reviews': google_reviews,
+                'website': extract_website(place.get('websiteUri', '')),
+                'instagram_url': extract_instagram(place.get('websiteUri', '')),
+                'phone_number': place.get('internationalPhoneNumber', ''),
+                'hours': hours_text,
+                'weeklyHours': hours_list  # Tüm haftalık saatler
             })
 
         # ===== PHASE 2: TEK BİR BATCH GEMİNİ ÇAĞRISI =====
         if filtered_places:
-            # Kullanıcı tercihlerini hazırla
+            # Kullanıcı tercihlerini hazırla - kategori bazlı
             user_preferences = []
-            if filters.get('groupSize') and filters['groupSize'] != 'Any':
-                user_preferences.append(f"Grup: {filters['groupSize']}")
-            if filters.get('alcohol') and filters['alcohol'] != 'Any':
-                user_preferences.append(f"ALKOL: {filters['alcohol']}")
-            if filters.get('liveMusic') and filters['liveMusic'] != 'Any':
-                user_preferences.append(f"CANLI MÜZİK: {filters['liveMusic']}")
-            if filters.get('smoking') and filters['smoking'] != 'Any':
-                user_preferences.append(f"SİGARA: {filters['smoking']}")
-            if filters.get('environment') and filters['environment'] != 'Any':
-                user_preferences.append(f"ORTAM: {filters['environment']}")
+            category_name = category.get('name', '')
+
+            # İlgisiz filtreleri atla: Spor, Etkinlik ve Deneyim kategorileri
+            skip_venue_filters = category_name in [
+                'Spor', 'Konserler', 'Sahne Sanatları', 'Yerel Festivaller',
+                'Beach Club', 'Plaj', 'Hafta Sonu Gezintisi', 'Piknik',
+                'Müze', 'Adrenalin', 'Michelin Yıldızlı'
+            ]
+
+            if not skip_venue_filters:
+                # Standart mekan filtreleri (restoran, bar, kafe vs. için)
+                if filters.get('groupSize') and filters['groupSize'] != 'Any':
+                    user_preferences.append(f"Grup: {filters['groupSize']}")
+                if filters.get('alcohol') and filters['alcohol'] != 'Any':
+                    user_preferences.append(f"ALKOL: {filters['alcohol']}")
+                if filters.get('liveMusic') and filters['liveMusic'] != 'Any':
+                    user_preferences.append(f"CANLI MÜZİK: {filters['liveMusic']}")
+                if filters.get('smoking') and filters['smoking'] != 'Any':
+                    user_preferences.append(f"SİGARA: {filters['smoking']}")
+                if filters.get('environment') and filters['environment'] != 'Any':
+                    user_preferences.append(f"ORTAM: {filters['environment']}")
+
+            # Spor kategorisi için sadece sportType filtresi
+            if category_name == 'Spor' and filters.get('sportType') and filters['sportType'] != 'Any':
+                user_preferences.append(f"SPOR TÜRÜ: {filters['sportType']}")
 
             preferences_text = ", ".join(user_preferences) if user_preferences else "Özel tercih yok"
             print(f"📋 Gemini BATCH çağrısı - {len(filtered_places)} mekan, filtreler: {preferences_text}", file=sys.stderr, flush=True)
@@ -703,7 +1599,14 @@ Aşağıdaki mekanları analiz et ve her biri için JSON döndür:
 {places_list}
 
 Her mekan için şu formatta JSON objesi oluştur:
-{{"name": "Mekan Adı", "isRelevant": true/false, "description": "2 cümle Türkçe açıklama", "vibeTags": ["#Tag1", "#Tag2", "#Tag3"], "noiseLevel": 30-70, "matchScore": 75-95}}
+{{"name": "Mekan Adı", "isRelevant": true/false, "description": "2 cümle Türkçe açıklama", "vibeTags": ["#Tag1", "#Tag2", "#Tag3"], "noiseLevel": 30-70, "matchScore": 75-95, "metrics": {{"noise": 20-80, "energy": 20-80, "service": 40-90, "light": 30-80, "privacy": 20-80}}}}
+
+metrics açıklamaları:
+- noise: Gürültü seviyesi (20=sessiz, 80=gürültülü)
+- energy: Ortam enerjisi (20=sakin, 80=enerjik)
+- service: Hizmet hızı/kalitesi (40=yavaş, 90=hızlı ve kaliteli)
+- light: Aydınlatma (30=loş, 80=aydınlık)
+- privacy: Mahremiyet (20=kalabalık, 80=özel)
 
 JSON ARRAY olarak döndür. Sadece uygun mekanları dahil et. SADECE JSON ARRAY, başka bir şey yazma."""
 
@@ -735,16 +1638,23 @@ JSON ARRAY olarak döndür. Sadece uygun mekanları dahil et. SADECE JSON ARRAY,
                             'id': f"v{place['idx'] + 1}",
                             'name': place['name'],
                             'description': ai_data.get('description', f"{category['name']} için harika bir mekan."),
-                            'imageUrl': place['photo_url'] or 'https://via.placeholder.com/800x600',
+                            'imageUrl': place['photo_url'] or 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800',
                             'category': category['name'],
                             'vibeTags': ai_data.get('vibeTags', ['#Popüler', '#Kaliteli']),
                             'address': place['address'],
                             'priceRange': place['price_range'],
                             'googleRating': place['rating'] if place['rating'] > 0 else 4.0,
+                            'googleReviewCount': place.get('review_count', 0),
                             'noiseLevel': ai_data.get('noiseLevel', 50),
                             'matchScore': ai_data.get('matchScore', 80),
                             'googleMapsUrl': place['google_maps_url'],
-                            'metrics': {'ambiance': 80, 'accessibility': 85, 'popularity': 75}
+                            'googleReviews': place.get('google_reviews', []),
+                            'website': place.get('website', ''),
+                            'instagramUrl': place.get('instagram_url', ''),
+                            'phoneNumber': place.get('phone_number', ''),
+                            'hours': place.get('hours', ''),
+                            'weeklyHours': place.get('weeklyHours', []),
+                            'metrics': ai_data.get('metrics', {'noise': 50, 'energy': 50, 'service': 70, 'light': 60, 'privacy': 50})
                         }
                         venues.append(venue)
 
@@ -758,16 +1668,23 @@ JSON ARRAY olarak döndür. Sadece uygun mekanları dahil et. SADECE JSON ARRAY,
                         'id': f"v{place['idx'] + 1}",
                         'name': place['name'],
                         'description': f"{category['name']} için harika bir mekan seçeneği.",
-                        'imageUrl': place['photo_url'] or 'https://via.placeholder.com/800x600',
+                        'imageUrl': place['photo_url'] or 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800',
                         'category': category['name'],
                         'vibeTags': ['#Popüler', '#Kaliteli'],
                         'address': place['address'],
                         'priceRange': place['price_range'],
                         'googleRating': place['rating'] if place['rating'] > 0 else 4.0,
+                        'googleReviewCount': place.get('review_count', 0),
                         'noiseLevel': 50,
                         'matchScore': 75,
                         'googleMapsUrl': place['google_maps_url'],
-                        'metrics': {'ambiance': 75, 'accessibility': 80, 'popularity': 70}
+                        'googleReviews': place.get('google_reviews', []),
+                        'website': place.get('website', ''),
+                        'instagramUrl': place.get('instagram_url', ''),
+                        'phoneNumber': place.get('phone_number', ''),
+                        'hours': place.get('hours', ''),
+                        'weeklyHours': place.get('weeklyHours', []),
+                        'metrics': {'noise': 50, 'energy': 50, 'service': 70, 'light': 60, 'privacy': 50}
                     }
                     venues.append(venue)
 
