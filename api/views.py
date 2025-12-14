@@ -21,6 +21,94 @@ from .serializers import (
 def get_gmaps_client():
     return googlemaps.Client(key=settings.GOOGLE_MAPS_API_KEY) if settings.GOOGLE_MAPS_API_KEY else None
 
+def search_google_places(query, max_results=1):
+    """
+    Google Places API ile mekan araması yapar.
+    Website, telefon, çalışma saatleri ve yorumları döndürür.
+    """
+    import requests
+
+    gmaps = get_gmaps_client()
+    if not gmaps:
+        return []
+
+    try:
+        # Text Search ile mekan bul
+        places_result = gmaps.places(query=query)
+
+        if not places_result.get('results'):
+            return []
+
+        results = []
+        for place in places_result['results'][:max_results]:
+            place_id = place.get('place_id')
+
+            # Place Details ile detaylı bilgi al
+            if place_id:
+                details = gmaps.place(
+                    place_id=place_id,
+                    fields=[
+                        'name', 'formatted_address', 'formatted_phone_number',
+                        'website', 'opening_hours', 'rating', 'user_ratings_total',
+                        'reviews', 'photos', 'geometry'
+                    ]
+                )
+
+                detail_result = details.get('result', {})
+
+                # Fotoğraf URL'i oluştur
+                image_url = None
+                if detail_result.get('photos'):
+                    photo_ref = detail_result['photos'][0].get('photo_reference')
+                    if photo_ref:
+                        image_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference={photo_ref}&key={settings.GOOGLE_MAPS_API_KEY}"
+
+                # Çalışma saatlerini işle
+                hours = ''
+                weekly_hours = []
+                opening_hours = detail_result.get('opening_hours', {})
+                if opening_hours:
+                    weekly_hours = opening_hours.get('weekday_text', [])
+                    if weekly_hours:
+                        # Bugünün çalışma saatini bul
+                        from datetime import datetime
+                        today_idx = datetime.now().weekday()
+                        if today_idx < len(weekly_hours):
+                            hours = weekly_hours[today_idx]
+
+                # Google Reviews'ları işle
+                google_reviews = []
+                if detail_result.get('reviews'):
+                    for review in detail_result['reviews'][:5]:
+                        google_reviews.append({
+                            'authorName': review.get('author_name', ''),
+                            'rating': review.get('rating', 5),
+                            'text': review.get('text', ''),
+                            'relativeTime': review.get('relative_time_description', ''),
+                            'profilePhotoUrl': review.get('profile_photo_url', '')
+                        })
+
+                results.append({
+                    'name': detail_result.get('name', place.get('name')),
+                    'address': detail_result.get('formatted_address', place.get('formatted_address', '')),
+                    'formatted_phone_number': detail_result.get('formatted_phone_number', ''),
+                    'website': detail_result.get('website', ''),
+                    'hours': hours,
+                    'weeklyHours': weekly_hours,
+                    'rating': detail_result.get('rating', place.get('rating')),
+                    'user_ratings_total': detail_result.get('user_ratings_total', place.get('user_ratings_total', 0)),
+                    'reviews': google_reviews,
+                    'imageUrl': image_url,
+                    'geometry': detail_result.get('geometry', place.get('geometry'))
+                })
+
+        return results
+
+    except Exception as e:
+        import sys
+        print(f"⚠️ Google Places API error: {e}", file=sys.stderr, flush=True)
+        return []
+
 def get_genai_model():
     if settings.GEMINI_API_KEY:
         genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -127,23 +215,66 @@ def generate_michelin_restaurants(location, filters):
         )
 
     try:
-        # Gemini'ye Michelin Guide bilgisi ile restoran listesi oluşturmasını iste
-        michelin_prompt = f"""
-{city} şehrindeki Michelin Guide 2024 restoranlarını listele.
+        # İlçe bilgisini al
+        districts = location.get('districts', [])
+        district = districts[0] if districts else None
 
-Michelin Guide Türkiye'de {city} için:
-- Michelin Yıldızlı restoranlar (1, 2 veya 3 yıldız)
-- Bib Gourmand restoranlar
-- Michelin Tavsiyeli (Selected) restoranlar
+        # Konum string'ini oluştur
+        if district:
+            location_str = f"{district}, {city}"
+            location_constraint = f"SADECE {district}, {city} ilçesinde bulunan"
+        else:
+            location_str = city
+            location_constraint = f"SADECE {city} ili sınırları içinde bulunan"
 
-EN AZ 15 RESTORAN LİSTELE. Eğer {city}'de yeterli Michelin restoranı yoksa, yakın bölgelerden (Urla, Çeşme, Alaçatı, Foça vb.) de ekle.
+        # includFineDining flag'i kontrol et (frontend'den gelebilir)
+        include_fine_dining = filters.get('includeFineDining', False)
+
+        if include_fine_dining:
+            # Fine dining dahil et
+            michelin_prompt = f"""
+{city} ilindeki en kaliteli fine dining restoranlarını listele.
+
+{city} ili kapsamı: {city} merkez ve TÜM ilçeleri dahil (örn: Bodrum, Marmaris, Fethiye, Datça, Dalaman vb.)
+
+Fine dining kriterleri:
+- Şık ve zarif atmosfer
+- Yüksek kaliteli mutfak
+- Profesyonel servis
+- Rezervasyon gerektiren mekanlar
+
+ÖNEMLİ: Sadece {city} ili sınırları içindeki restoranları listele. İzmir, İstanbul gibi BAŞKA İLLERDEN restoran EKLEME!
 
 JSON ARRAY formatında döndür. Her restoran:
-{{"id": "michelin_1", "name": "Restoran Adı", "description": "2 cümle açıklama", "imageUrl": "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800", "category": "Michelin Yıldızlı", "vibeTags": ["#MichelinGuide", "#FineDining", "#Restoran"], "address": "Tam adres, {city}", "priceRange": "$$$", "googleRating": 4.7, "noiseLevel": 35, "matchScore": 92, "googleMapsUrl": "", "michelinStatus": "Michelin Tavsiyeli", "metrics": {{"ambiance": 90, "accessibility": 85, "popularity": 95}}}}
+{{"id": "fine_1", "name": "Restoran Adı", "description": "2 cümle açıklama", "imageUrl": "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800", "category": "Michelin Yıldızlı", "vibeTags": ["#FineDining", "#Restoran"], "address": "İlçe, {city}", "priceRange": "$$$", "noiseLevel": 30, "matchScore": 92, "michelinStatus": "Fine Dining", "metrics": {{"noise": 30, "light": 60, "privacy": 70, "service": 95, "energy": 50}}}}
 
-SADECE JSON ARRAY döndür. Minimum 15 restoran."""
+SADECE JSON ARRAY döndür. En az 8-10 restoran listele."""
+        else:
+            # Sadece Michelin restoranları
+            michelin_prompt = f"""
+Michelin Guide Türkiye 2024'te {city} ilinde yer alan restoranları listele.
 
-        print(f"🍽️ Michelin Guide araması: {city}", file=sys.stderr, flush=True)
+{city} ili kapsamı: {city} merkez ve TÜM ilçeleri dahil!
+Örneğin Muğla için: Bodrum, Marmaris, Fethiye, Datça, Dalaman, Köyceğiz vb. ilçelerdeki Michelin restoranları DAHİL.
+
+Michelin kategorileri:
+- Michelin Yıldızlı (1, 2, 3 yıldız)
+- Bib Gourmand
+- Michelin Tavsiyeli (Selected)
+
+ÖNEMLİ:
+- {city} ilinin TÜM ilçelerindeki Michelin restoranlarını dahil et
+- Sadece BAŞKA İLLERDEN (İzmir, İstanbul, Ankara vb.) restoran EKLEME
+- Urla, Alaçatı, Çeşme = İZMİR'e ait, {city}'ya değil!
+
+Eğer {city} ilinde hiç Michelin restoranı yoksa BOŞ ARRAY [] döndür.
+
+JSON ARRAY formatında döndür. Her restoran:
+{{"id": "michelin_1", "name": "Restoran Adı", "description": "2 cümle açıklama", "imageUrl": "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800", "category": "Michelin Yıldızlı", "vibeTags": ["#MichelinGuide", "#FineDining"], "address": "İlçe, {city}", "priceRange": "$$$", "noiseLevel": 30, "matchScore": 92, "michelinStatus": "Yıldızlı/BibGourmand/Tavsiyeli", "metrics": {{"noise": 30, "light": 60, "privacy": 70, "service": 95, "energy": 50}}}}
+
+SADECE JSON ARRAY döndür."""
+
+        print(f"🍽️ Michelin Guide araması: {location_str}", file=sys.stderr, flush=True)
 
         response = model.generate_content(michelin_prompt)
         response_text = response.text.strip()
@@ -156,12 +287,43 @@ SADECE JSON ARRAY döndür. Minimum 15 restoran."""
 
         restaurants = json.loads(response_text)
 
-        # Google Maps URL ekle
+        # Google Places API ile zenginleştir
         for restaurant in restaurants:
-            search_query = urllib.parse.quote(f"{restaurant['name']} {city} restaurant")
+            search_query = urllib.parse.quote(f"{restaurant['name']} {location_str} restaurant")
             restaurant['googleMapsUrl'] = f"https://www.google.com/maps/search/?api=1&query={search_query}"
 
+            # Google Places API ile detay bilgileri al
+            try:
+                places_data = search_google_places(f"{restaurant['name']} {location_str}", 1)
+                if places_data:
+                    place = places_data[0]
+                    # Gerçek Google verilerini ekle
+                    restaurant['googleRating'] = place.get('rating', 4.5)
+                    restaurant['googleReviewCount'] = place.get('user_ratings_total', 0)
+                    restaurant['website'] = place.get('website', '')
+                    restaurant['phoneNumber'] = place.get('formatted_phone_number', '')
+                    restaurant['hours'] = place.get('hours', '')
+                    restaurant['weeklyHours'] = place.get('weeklyHours', [])
+                    # Fotoğraf URL'i
+                    if place.get('imageUrl'):
+                        restaurant['imageUrl'] = place['imageUrl']
+                    # Google Reviews
+                    if place.get('reviews'):
+                        restaurant['googleReviews'] = place['reviews'][:5]
+            except Exception as e:
+                print(f"⚠️ Google Places error for {restaurant['name']}: {e}", file=sys.stderr, flush=True)
+                restaurant['googleRating'] = 4.5
+                restaurant['googleReviewCount'] = 0
+
         print(f"✅ {len(restaurants)} Michelin restoran bulundu", file=sys.stderr, flush=True)
+
+        # Eğer hiç Michelin restoran yoksa ve fine dining dahil edilmediyse, öneri sun
+        if len(restaurants) == 0 and not include_fine_dining:
+            return Response({
+                'venues': [],
+                'suggestFineDining': True,
+                'message': f'{location_str} bölgesinde Michelin Guide\'da yer alan restoran bulunamadı. Fine dining restoranları görmek ister misiniz?'
+            }, status=status.HTTP_200_OK)
 
         return Response(restaurants, status=status.HTTP_200_OK)
 
@@ -1159,6 +1321,91 @@ def logout(request):
     return Response({'message': 'Başarıyla çıkış yapıldı'})
 
 
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def google_login(request):
+    """Google OAuth ile kullanıcı girişi"""
+    from google.oauth2 import id_token
+    from google.auth.transport import requests as google_requests
+
+    credential = request.data.get('credential')
+
+    if not credential:
+        return Response(
+            {'error': 'Google credential eksik'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        # Google ID token'i dogrula
+        idinfo = id_token.verify_oauth2_token(
+            credential,
+            google_requests.Request(),
+            settings.GOOGLE_OAUTH_CLIENT_ID
+        )
+
+        # Token'dan kullanici bilgilerini al
+        google_id = idinfo['sub']
+        email = idinfo.get('email', '')
+        first_name = idinfo.get('given_name', '')
+        last_name = idinfo.get('family_name', '')
+        picture = idinfo.get('picture', '')
+
+        # Kullaniciyi bul veya olustur (email'e gore)
+        user, created = User.objects.get_or_create(
+            email=email,
+            defaults={
+                'username': email.split('@')[0] + '_' + google_id[:8],
+                'first_name': first_name,
+                'last_name': last_name,
+            }
+        )
+
+        # Mevcut kullanici ise bilgilerini guncelle
+        if not created:
+            user.first_name = first_name or user.first_name
+            user.last_name = last_name or user.last_name
+            user.save()
+
+        # UserProfile olustur/guncelle
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+
+        # Google avatar ve auth bilgilerini kaydet
+        if not profile.preferences:
+            profile.preferences = {}
+        profile.preferences['avatar_url'] = picture
+        profile.preferences['auth_provider'] = 'google'
+        profile.preferences['google_id'] = google_id
+        profile.save()
+
+        # Token olustur
+        token, _ = Token.objects.get_or_create(user=user)
+
+        return Response({
+            'token': token.key,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'avatar_url': picture,
+            },
+            'created': created
+        }, status=status.HTTP_200_OK)
+
+    except ValueError as e:
+        return Response(
+            {'error': f'Gecersiz Google token: {str(e)}'},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+    except Exception as e:
+        return Response(
+            {'error': f'Google giris hatasi: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 def extract_website(url):
     """Instagram ve sosyal medya linklerini website'den ayırır"""
     if not url:
@@ -1196,15 +1443,18 @@ def generate_venues(request):
     filters = data.get('filters', {})
     trip_duration = data.get('tripDuration')
 
-    # DEBUG: Log incoming request data
+    # DEBUG: Log incoming request data (wrapped to prevent BrokenPipeError)
     import sys
-    print(f"\n{'='*60}", file=sys.stderr, flush=True)
-    print(f"🔍 INCOMING REQUEST DEBUG", file=sys.stderr, flush=True)
-    print(f"{'='*60}", file=sys.stderr, flush=True)
-    print(f"Category: {category}", file=sys.stderr, flush=True)
-    print(f"Filters received: {json.dumps(filters, indent=2, ensure_ascii=False)}", file=sys.stderr, flush=True)
-    print(f"Alcohol filter value: {filters.get('alcohol', 'NOT SET')}", file=sys.stderr, flush=True)
-    print(f"{'='*60}\n", file=sys.stderr, flush=True)
+    try:
+        print(f"\n{'='*60}", file=sys.stderr, flush=True)
+        print(f"🔍 INCOMING REQUEST DEBUG", file=sys.stderr, flush=True)
+        print(f"{'='*60}", file=sys.stderr, flush=True)
+        print(f"Category: {category}", file=sys.stderr, flush=True)
+        print(f"Filters received: {json.dumps(filters, indent=2, ensure_ascii=False)}", file=sys.stderr, flush=True)
+        print(f"Alcohol filter value: {filters.get('alcohol', 'NOT SET')}", file=sys.stderr, flush=True)
+        print(f"{'='*60}\n", file=sys.stderr, flush=True)
+    except BrokenPipeError:
+        pass  # İstemci bağlantıyı kapattı, devam et
 
     try:
         # Tatil kategorisi için özel işlem
