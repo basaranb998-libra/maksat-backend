@@ -76,9 +76,11 @@ def search_google_places(query, max_results=1):
                 # Çalışma saatlerini işle
                 hours = ''
                 weekly_hours = []
+                is_open_now = None
                 opening_hours = detail_result.get('opening_hours', {})
                 if opening_hours:
                     weekly_hours = opening_hours.get('weekday_text', [])
+                    is_open_now = opening_hours.get('open_now', None)
                     if weekly_hours:
                         # Bugünün çalışma saatini bul
                         from datetime import datetime
@@ -105,6 +107,7 @@ def search_google_places(query, max_results=1):
                     'website': detail_result.get('website', ''),
                     'hours': hours,
                     'weeklyHours': weekly_hours,
+                    'isOpenNow': is_open_now,
                     'rating': detail_result.get('rating', place.get('rating')),
                     'user_ratings_total': detail_result.get('user_ratings_total', place.get('user_ratings_total', 0)),
                     'reviews': google_reviews,
@@ -381,6 +384,7 @@ def generate_michelin_restaurants(location, filters):
                     restaurant['phoneNumber'] = place.get('formatted_phone_number', '')
                     restaurant['hours'] = place.get('hours', '')
                     restaurant['weeklyHours'] = place.get('weeklyHours', [])
+                    restaurant['isOpenNow'] = place.get('isOpenNow', None)
                     if place.get('imageUrl'):
                         restaurant['imageUrl'] = place['imageUrl']
                     if place.get('reviews'):
@@ -1902,6 +1906,7 @@ def generate_venues(request):
             opening_hours = place.get('currentOpeningHours', {})
             hours_list = opening_hours.get('weekdayDescriptions', [])  # 7 günlük liste
             hours_text = hours_list[0] if hours_list else ''  # Bugünün saati (backward compat)
+            is_open_now = opening_hours.get('openNow', None)  # Şu an açık mı?
 
             # Filtreyi geçen mekanları topla
             filtered_places.append({
@@ -1919,7 +1924,8 @@ def generate_venues(request):
                 'instagram_url': extract_instagram(place.get('websiteUri', '')),
                 'phone_number': place.get('internationalPhoneNumber', ''),
                 'hours': hours_text,
-                'weeklyHours': hours_list  # Tüm haftalık saatler
+                'weeklyHours': hours_list,  # Tüm haftalık saatler
+                'isOpenNow': is_open_now  # Şu an açık mı?
             })
 
         # ===== PHASE 2: TEK BİR BATCH GEMİNİ ÇAĞRISI =====
@@ -2035,6 +2041,7 @@ JSON ARRAY olarak döndür. Sadece uygun mekanları dahil et. SADECE JSON ARRAY,
                             'phoneNumber': place.get('phone_number', ''),
                             'hours': place.get('hours', ''),
                             'weeklyHours': place.get('weeklyHours', []),
+                            'isOpenNow': place.get('isOpenNow', None),
                             'metrics': ai_data.get('metrics', {'noise': 50, 'energy': 50, 'service': 70, 'light': 60, 'privacy': 50})
                         }
                         venues.append(venue)
@@ -2065,6 +2072,7 @@ JSON ARRAY olarak döndür. Sadece uygun mekanları dahil et. SADECE JSON ARRAY,
                         'phoneNumber': place.get('phone_number', ''),
                         'hours': place.get('hours', ''),
                         'weeklyHours': place.get('weeklyHours', []),
+                        'isOpenNow': place.get('isOpenNow', None),
                         'metrics': {'noise': 50, 'energy': 50, 'service': 70, 'light': 60, 'privacy': 50}
                     }
                     venues.append(venue)
