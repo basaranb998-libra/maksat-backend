@@ -98,3 +98,4 @@ class VenueGenerateSerializer(serializers.Serializer):
     location = LocationSerializer(required=True)
     filters = FiltersSerializer(required=False, default=dict)
     tripDuration = serializers.IntegerField(required=False)
+    excludeIds = serializers.ListField(child=serializers.CharField(), required=False, default=list)

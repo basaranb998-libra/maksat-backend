@@ -113,19 +113,19 @@ REST_FRAMEWORK = {
     ],
 }
 
-# CORS settings - Allow all origins in development
-CORS_ALLOW_ALL_ORIGINS = True  # Development only
+# CORS settings
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",  # Vite default port
+    "http://localhost:3000",
+    "http://localhost:3001",  # Next.js port
+    "https://maksat-ten.vercel.app",
+    "https://www.maksat.co",
+    "https://maksat.co",
+]
 
-# CORS_ALLOWED_ORIGINS = [
-#     "http://localhost:5173",  # Vite default port
-#     "http://localhost:3000",
-#     "http://localhost:3001",  # Next.js port
-#     "https://maksat-ten.vercel.app",
-# ]
-
-# Production'da environment'tan frontend URL ekle
-# if os.environ.get('FRONTEND_URL'):
-#     CORS_ALLOWED_ORIGINS.append(os.environ.get('FRONTEND_URL'))
+# Development'ta tüm origin'lere izin ver
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
 
 # CORS ayarları
 CORS_ALLOW_CREDENTIALS = True

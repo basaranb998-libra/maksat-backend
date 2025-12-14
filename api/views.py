@@ -1503,6 +1503,7 @@ def generate_venues(request):
     location = data['location']
     filters = data.get('filters', {})
     trip_duration = data.get('tripDuration')
+    exclude_ids = set(data.get('excludeIds', []))  # Set for O(1) lookup
 
     # DEBUG: Log incoming request data (wrapped to prevent BrokenPipeError)
     import sys
@@ -1513,6 +1514,9 @@ def generate_venues(request):
         print(f"Category: {category}", file=sys.stderr, flush=True)
         print(f"Filters received: {json.dumps(filters, indent=2, ensure_ascii=False)}", file=sys.stderr, flush=True)
         print(f"Alcohol filter value: {filters.get('alcohol', 'NOT SET')}", file=sys.stderr, flush=True)
+        print(f"Exclude IDs count: {len(exclude_ids)}", file=sys.stderr, flush=True)
+        if exclude_ids:
+            print(f"Exclude IDs: {list(exclude_ids)[:5]}...", file=sys.stderr, flush=True)
         print(f"{'='*60}\n", file=sys.stderr, flush=True)
     except BrokenPipeError:
         pass  # İstemci bağlantıyı kapattı, devam et
@@ -1577,6 +1581,8 @@ def generate_venues(request):
                 'Spor': 'gym fitness yoga studio',
                 'Fine Dining': 'fine dining restaurant wine bar',
                 'Michelin Yıldızlı': 'fine dining gourmet restaurant luxury upscale',
+                'Balıkçı': 'balık restoranı seafood restaurant rakı balık',
+                'Meyhane': 'meyhane rakı meze',
             }
         elif alcohol_filter == 'Non-Alcoholic':
             # Alkolsüz mekan seçilirse SADECE cafe, bakery, coffee shop ara
@@ -1632,6 +1638,7 @@ def generate_venues(request):
                 'Fine Dining': 'fine dining restaurant upscale gourmet',
                 'Michelin Yıldızlı': 'fine dining gourmet restaurant luxury upscale tasting menu',
                 'Meyhane': 'meyhane restaurant turkish tavern rakı meze',
+                'Balıkçı': 'balık restoranı seafood restaurant balık lokantası',
             }
 
         # Kategori ve filtrelere göre arama sorgusu oluştur
@@ -1644,11 +1651,23 @@ def generate_venues(request):
         # Lokasyon oluştur
         city = location['city']
         districts = location.get('districts', [])
+        neighborhoods = location.get('neighborhoods', [])
         selected_district = districts[0] if districts else None
-        search_location = f"{selected_district}, {city}" if selected_district else city
+        selected_neighborhood = neighborhoods[0] if neighborhoods else None
+
+        # Semt varsa semt ile ara, yoksa ilçe ile ara
+        if selected_neighborhood:
+            search_location = f"{selected_neighborhood}, {selected_district}, {city}"
+        elif selected_district:
+            search_location = f"{selected_district}, {city}"
+        else:
+            search_location = city
+
         import sys
         print(f"DEBUG - Selected District: {selected_district}", file=sys.stderr, flush=True)
+        print(f"DEBUG - Selected Neighborhood: {selected_neighborhood}", file=sys.stderr, flush=True)
         print(f"DEBUG - Search Location: {search_location}", file=sys.stderr, flush=True)
+        print(f"DEBUG - Exclude IDs count: {len(exclude_ids)}", file=sys.stderr, flush=True)
 
         # Google Places API'den mekan ara
         gmaps = get_gmaps_client()
@@ -1667,10 +1686,11 @@ def generate_venues(request):
                     "X-Goog-Api-Key": settings.GOOGLE_MAPS_API_KEY,
                     "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours"
                 }
+
                 payload = {
                     "textQuery": f"{search_query} in {search_location}, Turkey",
                     "languageCode": "tr",
-                    "maxResultCount": 20  # Gemini filtreleyeceği için daha fazla sonuç iste
+                    "maxResultCount": 20  # Maximum sonuç
                 }
 
                 print(f"DEBUG - Google Places API Query: {payload['textQuery']}", file=sys.stderr, flush=True)
@@ -1705,6 +1725,11 @@ def generate_venues(request):
             place_rating = place.get('rating', 0)
             place_review_count = place.get('userRatingCount', 0)
             place_types = place.get('types', [])
+
+            # ===== EXCLUDE IDS FİLTRESİ: Daha önce gösterilen mekanları atla =====
+            if place_id in exclude_ids:
+                print(f"⏭️ EXCLUDE REJECT - {place_name}: zaten gösterildi (ID: {place_id})", file=sys.stderr, flush=True)
+                continue
 
             # ===== İLÇE FİLTRESİ: Seçilen ilçeye ait olmayan mekanları atla =====
             if selected_district:
@@ -1753,7 +1778,11 @@ def generate_venues(request):
             place_name_lower = place_name.lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
             place_types_str = ' '.join(place_types).lower()
 
-            if alcohol_filter == 'Alcoholic':
+            # Balıkçı ve Meyhane kategorilerinde alkol filtresini ATLA - Gemini karar versin
+            category_name = category['name']
+            skip_alcohol_filter = category_name in ['Balıkçı', 'Meyhane']
+
+            if alcohol_filter == 'Alcoholic' and not skip_alcohol_filter:
                 # Kahve/kafe mekanlarını filtrele - hem types hem isimde kontrol et
                 coffee_keywords = ['cafe', 'coffee', 'kahve', 'kafe', 'bakery', 'tea_house', 'pastry', 'patisserie', 'firin', 'borek']
 
@@ -1769,7 +1798,7 @@ def generate_venues(request):
                     print(f"❌ ALKOL REJECT (isim) - {place_name}: kahve/kafe isimli", file=sys.stderr, flush=True)
                     continue
 
-            elif alcohol_filter == 'Non-Alcoholic':
+            elif alcohol_filter == 'Non-Alcoholic' and not skip_alcohol_filter:
                 # Alkollü mekanları filtrele - hem types hem isimde kontrol et
                 alcohol_keywords = ['bar', 'pub', 'nightclub', 'wine_bar', 'liquor', 'cocktail', 'meyhane', 'bira']
 
@@ -1819,6 +1848,27 @@ def generate_venues(request):
 
                 if not is_meyhane:
                     print(f"❌ MEYHANE REJECT - {place_name}: isminde 'meyhane' yok", file=sys.stderr, flush=True)
+                    continue
+
+            # ===== BALIKÇI KATEGORİSİ FİLTRESİ =====
+            # Balıkçı kategorisinde balık pişiricilerini hariç tut
+            if category['name'] == 'Balıkçı':
+                # Rating filtresi - 3.9 altını reddet
+                if place_rating < 3.9:
+                    print(f"❌ BALIKÇI RATING REJECT - {place_name}: rating={place_rating} < 3.9", file=sys.stderr, flush=True)
+                    continue
+
+                # Review count filtresi - 10'dan az yorumu reddet
+                if place_review_count < 10:
+                    print(f"❌ BALIKÇI REVIEW REJECT - {place_name}: reviews={place_review_count} < 10", file=sys.stderr, flush=True)
+                    continue
+
+                # İsim bazlı filtre - balık pişiricileri ve marketleri hariç tut
+                excluded_keywords = ['pişirici', 'balık ekmek', 'balıkekmek', 'tezgah', 'market', 'pazarı', 'hal']
+                is_excluded = any(keyword in place_name_lower for keyword in excluded_keywords)
+
+                if is_excluded:
+                    print(f"❌ BALIKÇI REJECT - {place_name}: balık pişirici/market türü", file=sys.stderr, flush=True)
                     continue
 
             # Google Reviews'ı parse et (max 10, en yeniden eskiye sıralı)
@@ -1903,9 +1953,21 @@ def generate_venues(request):
                 for i, p in enumerate(filtered_places[:10])  # Max 10 mekan
             ])
 
+            # Balıkçı kategorisi için özel talimat
+            balikci_instruction = ""
+            if category['name'] == 'Balıkçı' and 'ALKOL: Alcoholic' in preferences_text:
+                balikci_instruction = """
+ÖNEMLİ UYARI - BALIKÇI KATEGORİSİ ALKOL FİLTRESİ:
+Kullanıcı ALKOLLÜ balık restoranı istiyor. Aşağıdaki mekanları DİKKATLİCE değerlendir:
+- Sadece gerçekten alkol servisi yapan, lisanslı balık restoranlarını dahil et
+- Sade balık lokantaları, balık evi, balıkçı dükkanı gibi alkol servisi OLMAYAN yerleri REDDET (isRelevant: false)
+- Rakı/şarap ile balık yenebilecek kaliteli restoranları tercih et
+- "Vedat'ın Balık Evi", "Çarşı Balık", "Girne Balık Evi" gibi sade balık lokantaları genellikle ALKOLSÜZ'dür, dikkat et!
+"""
+
             batch_prompt = f"""Kategori: {category['name']}
 Filtreler: {preferences_text}
-
+{balikci_instruction}
 Aşağıdaki mekanları analiz et ve her biri için JSON döndür:
 {places_list}
 
@@ -2002,8 +2064,7 @@ JSON ARRAY olarak döndür. Sadece uygun mekanları dahil et. SADECE JSON ARRAY,
         # Match score'a göre sırala
         venues.sort(key=lambda x: x['matchScore'], reverse=True)
 
-        # İlk 8-10 sonucu döndür
-        final_venues = venues[:10]
+        print(f"DEBUG - Total venues: {len(venues)}", file=sys.stderr, flush=True)
 
         # Arama geçmişine kaydet
         if request.user.is_authenticated:
@@ -2012,10 +2073,10 @@ JSON ARRAY olarak döndür. Sadece uygun mekanları dahil et. SADECE JSON ARRAY,
                 query=search_query,
                 intent=category['name'],
                 location=search_location,
-                results_count=len(final_venues)
+                results_count=len(venues)
             )
 
-        return Response(final_venues, status=status.HTTP_200_OK)
+        return Response(venues, status=status.HTTP_200_OK)
 
     except Exception as e:
         import traceback
