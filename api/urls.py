@@ -8,6 +8,9 @@ router.register(r'search-history', views.SearchHistoryViewSet, basename='search-
 router.register(r'profile', views.UserProfileViewSet, basename='profile')
 
 urlpatterns = [
+    # Health check (for Render cold start)
+    path('health/', views.health_check, name='health-check'),
+
     # Authentication
     path('auth/register/', views.register, name='register'),
     path('auth/login/', views.login, name='login'),

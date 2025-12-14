@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: maksat-backend
+    runtime: python
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn maksat_backend.wsgi:application --config gunicorn.conf.py"
+    healthCheckPath: /api/health/
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false

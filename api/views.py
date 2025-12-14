@@ -17,6 +17,14 @@ from .serializers import (
     VenueGenerateSerializer
 )
 
+
+# Health check endpoint for Render cold start optimization
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def health_check(request):
+    """Simple health check endpoint to keep the service warm."""
+    return Response({'status': 'ok'}, status=status.HTTP_200_OK)
+
 # Initialize APIs - lazy load to avoid errors during startup
 def get_gmaps_client():
     return googlemaps.Client(key=settings.GOOGLE_MAPS_API_KEY) if settings.GOOGLE_MAPS_API_KEY else None
