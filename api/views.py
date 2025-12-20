@@ -100,7 +100,9 @@ def is_michelin_restaurant(venue_name):
 
     return None
 
-from .models import FavoriteVenue, SearchHistory, UserProfile
+from .models import FavoriteVenue, SearchHistory, UserProfile, CachedVenue
+from django.utils import timezone
+from datetime import timedelta
 from .serializers import (
     UserSerializer, UserRegistrationSerializer,
     FavoriteVenueSerializer, SearchHistorySerializer,
@@ -119,6 +121,94 @@ def health_check(request):
 # Initialize APIs - lazy load to avoid errors during startup
 def get_gmaps_client():
     return googlemaps.Client(key=settings.GOOGLE_MAPS_API_KEY) if settings.GOOGLE_MAPS_API_KEY else None
+
+
+# ===== CACHE HELPER FONKSİYONLARI =====
+CACHE_MAX_AGE_DAYS = 30  # Bu kadar günden eski veriler yeniden sorgulanır
+CACHE_VENUES_LIMIT = 5  # Cache'ten alınacak venue sayısı
+
+def get_cached_venues_for_hybrid(category_name: str, city: str, district: str = None, exclude_ids: set = None, limit: int = 5):
+    """
+    Hybrid sistem için cache'ten venue'ları çeker.
+    Belirtilen limit kadar venue döndürür (varsayılan 5).
+    Ayrıca cache'teki tüm place_id'leri döndürür (API çağrısında exclude için).
+    Returns: (venues_list, all_cached_place_ids)
+    """
+    import sys
+
+    try:
+        # Cache sorgusu - category + city + district
+        cache_query = CachedVenue.objects.filter(
+            category=category_name,
+            city__iexact=city
+        )
+
+        if district:
+            cache_query = cache_query.filter(district__iexact=district)
+
+        # 30 günden eski olmayan kayıtlar
+        cache_cutoff = timezone.now() - timedelta(days=CACHE_MAX_AGE_DAYS)
+        cache_query = cache_query.filter(last_api_call__gte=cache_cutoff)
+
+        cached_venues = list(cache_query)
+
+        # Tüm cache'teki place_id'leri al (API'de exclude için)
+        all_cached_ids = {v.place_id for v in cached_venues}
+
+        # Exclude IDs'ları filtrele
+        if exclude_ids:
+            cached_venues = [v for v in cached_venues if v.place_id not in exclude_ids]
+
+        print(f"📦 CACHE - {category_name}/{city}/{district or 'ALL'}: {len(cached_venues)} venue (toplam cache: {len(all_cached_ids)})", file=sys.stderr, flush=True)
+
+        # Limit kadar venue döndür
+        venues_data = [v.venue_data for v in cached_venues[:limit]]
+
+        return venues_data, all_cached_ids
+    except Exception as e:
+        print(f"⚠️ CACHE ERROR - {category_name}/{city}: {e}", file=sys.stderr, flush=True)
+        return [], set()  # Cache error - boş döndür
+
+
+def save_venues_to_cache(venues: list, category_name: str, city: str, district: str = None, neighborhood: str = None):
+    """
+    Venue'ları cache'e kaydeder.
+    Her venue için place_id'ye göre update_or_create yapar.
+    Tablo yoksa veya hata olursa sessizce başarısız olur.
+    """
+    import sys
+
+    try:
+        saved_count = 0
+        for venue in venues:
+            place_id = venue.get('id', '')
+
+            # place_id yoksa atla
+            if not place_id:
+                continue
+
+            try:
+                CachedVenue.objects.update_or_create(
+                    place_id=place_id,
+                    defaults={
+                        'name': venue.get('name', ''),
+                        'category': category_name,
+                        'city': city,
+                        'district': district or '',
+                        'neighborhood': neighborhood or '',
+                        'venue_data': venue,
+                        'google_rating': venue.get('googleRating'),
+                        'google_review_count': venue.get('googleReviewCount'),
+                        'last_api_call': timezone.now()
+                    }
+                )
+                saved_count += 1
+            except Exception as e:
+                print(f"⚠️ Cache save error for {place_id}: {e}", file=sys.stderr, flush=True)
+
+        print(f"💾 CACHE SAVE - {saved_count}/{len(venues)} venue kaydedildi ({category_name}/{city}/{district or 'ALL'})", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"⚠️ CACHE SAVE FAILED - {category_name}/{city}: {e}", file=sys.stderr, flush=True)
 
 def search_google_places(query, max_results=1):
     """
@@ -505,15 +595,32 @@ def generate_michelin_restaurants(location, filters):
         )
 
 
-def generate_fine_dining_with_michelin(location, filters):
-    """Fine Dining kategorisi - önce Michelin restoranları, sonra diğer fine dining mekanlar"""
+def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
+    """Fine Dining kategorisi - önce Michelin restoranları, sonra diğer fine dining mekanlar
+    Gemini ile practicalInfo, atmosphereSummary ve enriched description eklenir.
+    """
     import json
     import sys
     import requests
+    import re
 
     city = location['city']
     districts = location.get('districts', [])
     neighborhoods = location.get('neighborhoods', [])
+    selected_district = districts[0] if districts else None
+
+    # ===== HYBRID CACHE SİSTEMİ =====
+    exclude_ids_set = set(exclude_ids) if exclude_ids else set()
+    cached_venues, all_cached_ids = get_cached_venues_for_hybrid(
+        category_name='Fine Dining',
+        city=city,
+        district=selected_district,
+        exclude_ids=exclude_ids_set,
+        limit=CACHE_VENUES_LIMIT
+    )
+    # API exclude için cache'teki ID'leri ekle
+    api_exclude_ids = exclude_ids_set | all_cached_ids
+    print(f"🔀 HYBRID - Fine Dining Cache: {len(cached_venues)}, API exclude: {len(api_exclude_ids)}", file=sys.stderr, flush=True)
 
     # Birden fazla ilçe için search locations oluştur
     search_locations = []
@@ -570,7 +677,8 @@ def generate_fine_dining_with_michelin(location, filters):
     }
 
     try:
-        venues = []
+        # Tüm mekanları toplama listesi (Gemini'ye gönderilecek)
+        all_venues_for_gemini = []
         added_names = set()
 
         # 1. ADIM: Şehirdeki Michelin restoranlarını al
@@ -600,10 +708,10 @@ def generate_fine_dining_with_michelin(location, filters):
             # Badge sadece yıldızlı veya Bib Gourmand için gösterilecek (Selected için değil)
             is_starred_or_bib = 'Yıldız' in r['status'] or 'Bib' in r['status']
 
-            venue = {
+            venue_data = {
                 'id': f"michelin_fd_{idx+1}",
                 'name': r['name'],
-                'description': f"{r['cuisine']} mutfağı sunan {r['status']} ödüllü restoran.",
+                'base_description': f"{r['cuisine']} mutfağı sunan {r['status']} ödüllü restoran.",
                 'imageUrl': 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800',
                 'category': 'Fine Dining',
                 'vibeTags': ['#MichelinGuide', f"#{r['status'].replace(' ', '')}", f"#{r['cuisine'].replace(' ', '')}"],
@@ -611,9 +719,11 @@ def generate_fine_dining_with_michelin(location, filters):
                 'priceRange': '$$$' if r['status'] == 'Selected' else '$$$$',
                 'matchScore': 98 if '2 Yıldız' in r['status'] else 95 if '1 Yıldız' in r['status'] else 92 if 'Bib' in r['status'] else 88,
                 'noiseLevel': 30,
-                'metrics': {'noise': 30, 'light': 65, 'privacy': 70, 'service': 95, 'energy': 55},
                 'googleMapsUrl': f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(search_query)}",
-                'isMichelinStarred': is_starred_or_bib  # Sadece yıldızlı/Bib için badge
+                'isMichelinStarred': is_starred_or_bib,
+                'google_reviews': [],  # Gemini için
+                'michelin_status': r['status'],
+                'cuisine': r['cuisine']
             }
 
             # Google Places API ile detay al
@@ -621,31 +731,31 @@ def generate_fine_dining_with_michelin(location, filters):
                 places_data = search_google_places(search_query, 1)
                 if places_data:
                     place = places_data[0]
-                    venue['googleRating'] = place.get('rating', 4.5)
-                    venue['googleReviewCount'] = place.get('user_ratings_total', 0)
-                    venue['website'] = place.get('website', '')
-                    venue['phoneNumber'] = place.get('formatted_phone_number', '')
-                    venue['hours'] = place.get('hours', '')
-                    venue['weeklyHours'] = place.get('weeklyHours', [])
-                    venue['isOpenNow'] = place.get('isOpenNow', None)
+                    venue_data['googleRating'] = place.get('rating', 4.5)
+                    venue_data['googleReviewCount'] = place.get('user_ratings_total', 0)
+                    venue_data['website'] = place.get('website', '')
+                    venue_data['phoneNumber'] = place.get('formatted_phone_number', '')
+                    venue_data['hours'] = place.get('hours', '')
+                    venue_data['weeklyHours'] = place.get('weeklyHours', [])
+                    venue_data['isOpenNow'] = place.get('isOpenNow', None)
                     if place.get('imageUrl'):
-                        venue['imageUrl'] = place['imageUrl']
+                        venue_data['imageUrl'] = place['imageUrl']
                     if place.get('reviews'):
-                        venue['googleReviews'] = place['reviews'][:5]
+                        venue_data['google_reviews'] = place['reviews'][:5]
+                        venue_data['googleReviews'] = place['reviews'][:5]
             except Exception as e:
                 print(f"⚠️ Google Places error for {r['name']}: {e}", file=sys.stderr, flush=True)
-                venue['googleRating'] = 4.5
-                venue['googleReviewCount'] = 0
+                venue_data['googleRating'] = 4.5
+                venue_data['googleReviewCount'] = 0
 
-            venues.append(venue)
+            all_venues_for_gemini.append(venue_data)
             added_names.add(r['name'].lower())
 
-        print(f"✅ {len(venues)} Michelin restoran eklendi", file=sys.stderr, flush=True)
+        print(f"✅ {len(all_venues_for_gemini)} Michelin restoran eklendi", file=sys.stderr, flush=True)
 
         # 2. ADIM: Google Places'dan ek fine dining restoranlar
-        # Birden fazla sorgu yaparak gizli cevherleri de yakala
-        if len(venues) < 10:
-            remaining_slots = 10 - len(venues)
+        if len(all_venues_for_gemini) < 10:
+            remaining_slots = 10 - len(all_venues_for_gemini)
 
             url = "https://places.googleapis.com/v1/places:searchText"
             headers = {
@@ -654,7 +764,6 @@ def generate_fine_dining_with_michelin(location, filters):
                 "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours,places.businessStatus"
             }
 
-            # Her lokasyon için sorgu yap
             query_templates = [
                 "fine dining restaurant upscale gourmet in {loc}, Turkey",
                 "italian restaurant trattoria osteria in {loc}, Turkey",
@@ -689,11 +798,9 @@ def generate_fine_dining_with_michelin(location, filters):
                                 place_rating = place.get('rating', 0)
                                 place_types = place.get('types', [])
 
-                                # Zaten eklenmiş mi?
                                 if place_name_lower in added_names:
                                     continue
 
-                                # İlçe filtresi - seçilen ilçelerden birinde olmalı
                                 if districts:
                                     address_lower = place_address.lower()
                                     address_normalized = address_lower.replace('ı', 'i').replace('ş', 's').replace('ğ', 'g').replace('ü', 'u').replace('ö', 'o').replace('ç', 'c')
@@ -710,11 +817,9 @@ def generate_fine_dining_with_michelin(location, filters):
                                         print(f"❌ Fine Dining İLÇE REJECT - {place_name}: seçilen ilçelerde değil", file=sys.stderr, flush=True)
                                         continue
 
-                                # Düşük puanlı mekanları atla
                                 if place_rating < 4.2:
                                     continue
 
-                                # Pastacılık, fırın gibi Fine Dining olmayan yerleri filtrele
                                 excluded_keywords = [
                                     'pastane', 'pasta atölyesi', 'butik pasta', 'patisserie',
                                     'bakery', 'fırın', 'börek', 'simit', 'kafeterya'
@@ -734,9 +839,9 @@ def generate_fine_dining_with_michelin(location, filters):
                     except Exception as e:
                         print(f"⚠️ Fine dining sorgu hatası: {e}", file=sys.stderr, flush=True)
 
-            print(f"📊 Toplam {len(all_places)} unique mekan bulundu", file=sys.stderr, flush=True)
+            print(f"📊 Toplam {len(all_places)} unique Google Places mekan bulundu", file=sys.stderr, flush=True)
 
-            # Rating'e göre sırala ve venue'lara ekle
+            # Rating'e göre sırala
             all_places.sort(key=lambda x: x.get('rating', 0), reverse=True)
 
             for idx, place in enumerate(all_places[:remaining_slots]):
@@ -744,20 +849,32 @@ def generate_fine_dining_with_michelin(location, filters):
                 place_address = place.get('formattedAddress', '')
                 place_rating = place.get('rating', 0)
 
-                # Fotoğraf URL'si
                 photo_url = 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800'
                 if place.get('photos'):
                     photo_name = place['photos'][0].get('name', '')
                     if photo_name:
                         photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?maxHeightPx=800&maxWidthPx=800&key={settings.GOOGLE_MAPS_API_KEY}"
 
-                # Michelin kontrolü
                 michelin_info = is_michelin_restaurant(place_name)
 
-                venue = {
+                # Google reviews al
+                google_reviews = []
+                raw_reviews = place.get('reviews', [])
+                for review in raw_reviews[:5]:
+                    google_reviews.append({
+                        'authorName': review.get('authorAttribution', {}).get('displayName', 'Anonim'),
+                        'rating': review.get('rating', 5),
+                        'text': review.get('text', {}).get('text', ''),
+                        'relativeTime': review.get('relativePublishTimeDescription', ''),
+                        'profilePhotoUrl': review.get('authorAttribution', {}).get('photoUri', '')
+                    })
+
+                opening_hours = place.get('currentOpeningHours', {})
+
+                venue_data = {
                     'id': f"fd_{idx+1}",
                     'name': place_name,
-                    'description': f"Fine dining deneyimi sunan şık ve kaliteli bir restoran.",
+                    'base_description': f"Fine dining deneyimi sunan şık ve kaliteli bir restoran.",
                     'imageUrl': photo_url,
                     'category': 'Fine Dining',
                     'vibeTags': ['#FineDining', '#Gourmet'],
@@ -767,21 +884,239 @@ def generate_fine_dining_with_michelin(location, filters):
                     'googleReviewCount': place.get('userRatingCount', 0),
                     'matchScore': 85,
                     'noiseLevel': 35,
-                    'metrics': {'noise': 35, 'light': 60, 'privacy': 65, 'service': 85, 'energy': 50},
                     'googleMapsUrl': f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(place_name + ' ' + city)}",
-                    'isMichelinStarred': michelin_info is not None
+                    'isMichelinStarred': michelin_info is not None,
+                    'weeklyHours': opening_hours.get('weekdayDescriptions', []),
+                    'isOpenNow': opening_hours.get('openNow', None),
+                    'website': place.get('websiteUri', ''),
+                    'phoneNumber': place.get('internationalPhoneNumber', ''),
+                    'google_reviews': google_reviews,
+                    'googleReviews': google_reviews
                 }
 
-                # Çalışma saatleri
-                opening_hours = place.get('currentOpeningHours', {})
-                venue['weeklyHours'] = opening_hours.get('weekdayDescriptions', [])
-                venue['isOpenNow'] = opening_hours.get('openNow', None)
+                all_venues_for_gemini.append(venue_data)
 
-                venues.append(venue)
+        print(f"✅ Gemini'ye gönderilecek toplam {len(all_venues_for_gemini)} mekan", file=sys.stderr, flush=True)
 
-            print(f"✅ Toplam {len(venues)} fine dining restoran", file=sys.stderr, flush=True)
+        # 3. ADIM: Gemini ile practicalInfo ve atmosphereSummary ekle
+        venues = []
+        if all_venues_for_gemini:
+            # Pratik bilgi içeren yorumları öncelikli seç
+            practical_keywords = ['otopark', 'park', 'vale', 'valet', 'rezervasyon', 'bekle', 'sıra', 'kuyruk',
+                                  'kalabalık', 'sakin', 'sessiz', 'gürültü', 'çocuk', 'bebek', 'aile',
+                                  'vejetaryen', 'vegan', 'alkol', 'rakı', 'şarap', 'bira', 'servis',
+                                  'hızlı', 'yavaş', 'pahalı', 'ucuz', 'fiyat', 'hesap', 'bahçe', 'teras', 'dış mekan']
 
-        return Response(venues, status=status.HTTP_200_OK)
+            # Gemini için mekan listesi oluştur
+            places_list_items = []
+            for i, v in enumerate(all_venues_for_gemini[:10]):
+                reviews_text = ""
+                if v.get('google_reviews'):
+                    all_reviews = v['google_reviews']
+                    practical_reviews = []
+                    other_reviews = []
+                    for r in all_reviews:
+                        text = r.get('text', '').lower()
+                        if any(kw in text for kw in practical_keywords):
+                            practical_reviews.append(r)
+                        else:
+                            other_reviews.append(r)
+                    selected_reviews = practical_reviews[:3] + other_reviews[:2]
+                    top_reviews = [r.get('text', '')[:350] for r in selected_reviews if r.get('text')]
+                    if top_reviews:
+                        reviews_text = f" | Yorumlar: {' /// '.join(top_reviews)}"
+
+                michelin_note = f" | Michelin: {v.get('michelin_status', '')}" if v.get('michelin_status') else ""
+                places_list_items.append(
+                    f"{i+1}. {v['name']} | Rating: {v.get('googleRating', 'N/A')}{michelin_note}{reviews_text}"
+                )
+            places_list = "\n".join(places_list_items)
+
+            batch_prompt = f"""Kategori: Fine Dining
+Kullanıcı Tercihleri: Fine dining deneyimi, kaliteli restoran
+
+Mekanlar ve Yorumları:
+{places_list}
+
+Her mekan için analiz yap ve JSON döndür:
+{{
+  "name": "Mekan Adı",
+  "description": "2 cümle Türkçe - mekanın öne çıkan özelliği, fine dining atmosferi",
+  "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
+  "practicalInfo": {{
+    "reservationNeeded": "Tavsiye Edilir" | "Şart" | "Gerekli Değil" | null,
+    "crowdLevel": "Sakin" | "Orta" | "Kalabalık" | null,
+    "waitTime": "Bekleme yok" | "10-15 dk" | "20-30 dk" | null,
+    "parking": "Kolay" | "Zor" | "Otopark var" | "Yok" | null,
+    "hasValet": true | false | null,
+    "outdoorSeating": true | false | null,
+    "kidFriendly": true | false | null,
+    "vegetarianOptions": true | false | null,
+    "alcoholServed": true | false | null,
+    "serviceSpeed": "Hızlı" | "Normal" | "Yavaş" | null,
+    "priceFeeling": "Fiyatına Değer" | "Biraz Pahalı" | "Uygun" | null,
+    "mustTry": "Yorumlarda öne çıkan yemek/içecek" | null,
+    "headsUp": "Bilmeniz gereken önemli uyarı" | null
+  }},
+  "atmosphereSummary": {{
+    "noiseLevel": "Sessiz" | "Sohbet Dostu" | "Canlı" | "Gürültülü",
+    "lighting": "Loş" | "Yumuşak" | "Aydınlık",
+    "privacy": "Özel" | "Yarı Özel" | "Açık Alan",
+    "energy": "Sakin" | "Dengeli" | "Enerjik",
+    "idealFor": ["romantik akşam", "iş yemeği", "özel gün"],
+    "notIdealFor": ["aile yemeği"],
+    "oneLiner": "Tek cümle Türkçe atmosfer özeti"
+  }}
+}}
+
+practicalInfo Kuralları (YORUMLARDAN ÇIKAR):
+- reservationNeeded: Fine dining genelde "Şart" veya "Tavsiye Edilir"
+- crowdLevel: "Sakin", "sessiz", "rahat" → "Sakin". "Kalabalık", "gürültülü" → "Kalabalık"
+- parking: "Otopark", "park yeri" → "Otopark var". "Park zor", "park yok" → "Zor". "Park kolay" → "Kolay"
+- hasValet: "Vale", "valet" → true. Yoksa null
+- outdoorSeating: "Bahçe", "dış mekan", "teras" → true
+- kidFriendly: Fine dining genelde false, özellikle belirtilmemişse null
+- alcoholServed: Fine dining genelde true (şarap listesi vb.)
+- mustTry: Yorumlarda en çok övülen yemek/tasting menu
+- headsUp: Önemli uyarılar (dress code, nakit kabul etmeme vb.)
+
+atmosphereSummary Kuralları:
+- noiseLevel: Fine dining genelde "Sessiz" veya "Sohbet Dostu"
+- lighting: Fine dining genelde "Loş" veya "Yumuşak"
+- privacy: Fine dining genelde "Özel" veya "Yarı Özel"
+- energy: Fine dining genelde "Sakin" veya "Dengeli"
+- idealFor: Max 3 - "romantik akşam", "iş yemeği", "özel gün", "kutlama", "ilk buluşma"
+- notIdealFor: Max 2 - "aile yemeği", "hızlı yemek", "çocuklu gelmek"
+- oneLiner: Tek cümle atmosfer özeti
+
+SADECE JSON ARRAY döndür, başka açıklama yazma."""
+
+            try:
+                model = get_genai_model()
+                if model:
+                    response = model.generate_content(batch_prompt)
+                    response_text = response.text.strip()
+
+                    # Güvenli JSON parse
+                    response_text = re.sub(r'```json\s*|\s*```', '', response_text)
+                    response_text = response_text.strip()
+
+                    try:
+                        ai_results = json.loads(response_text)
+                    except json.JSONDecodeError:
+                        match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                        if match:
+                            ai_results = json.loads(match.group())
+                        else:
+                            print(f"⚠️ Fine Dining JSON parse edilemedi, fallback kullanılıyor", file=sys.stderr, flush=True)
+                            ai_results = []
+
+                    # AI sonuçlarını mekanlarla eşleştir
+                    ai_by_name = {r.get('name', '').lower(): r for r in ai_results}
+
+                    for venue_data in all_venues_for_gemini[:10]:
+                        ai_data = ai_by_name.get(venue_data['name'].lower(), {})
+
+                        venue = {
+                            'id': venue_data['id'],
+                            'name': venue_data['name'],
+                            'description': ai_data.get('description', venue_data['base_description']),
+                            'imageUrl': venue_data['imageUrl'],
+                            'category': 'Fine Dining',
+                            'vibeTags': ai_data.get('vibeTags', venue_data.get('vibeTags', ['#FineDining', '#Gourmet'])),
+                            'address': venue_data['address'],
+                            'priceRange': venue_data['priceRange'],
+                            'googleRating': venue_data.get('googleRating', 4.5),
+                            'googleReviewCount': venue_data.get('googleReviewCount', 0),
+                            'matchScore': venue_data['matchScore'],
+                            'noiseLevel': venue_data['noiseLevel'],
+                            'googleMapsUrl': venue_data['googleMapsUrl'],
+                            'isMichelinStarred': venue_data.get('isMichelinStarred', False),
+                            'googleReviews': venue_data.get('googleReviews', []),
+                            'website': venue_data.get('website', ''),
+                            'phoneNumber': venue_data.get('phoneNumber', ''),
+                            'hours': venue_data.get('hours', ''),
+                            'weeklyHours': venue_data.get('weeklyHours', []),
+                            'isOpenNow': venue_data.get('isOpenNow', None),
+                            'practicalInfo': ai_data.get('practicalInfo', {}),
+                            'atmosphereSummary': ai_data.get('atmosphereSummary', {
+                                'noiseLevel': 'Sessiz',
+                                'lighting': 'Loş',
+                                'privacy': 'Özel',
+                                'energy': 'Sakin',
+                                'idealFor': ['romantik akşam', 'özel gün'],
+                                'notIdealFor': [],
+                                'oneLiner': 'Fine dining deneyimi sunan şık bir mekan.'
+                            })
+                        }
+
+                        venues.append(venue)
+
+                    print(f"✅ Gemini ile {len(venues)} Fine Dining mekan zenginleştirildi", file=sys.stderr, flush=True)
+
+            except Exception as e:
+                print(f"❌ Gemini Fine Dining hatası: {e}", file=sys.stderr, flush=True)
+                # Fallback: Gemini olmadan mekanları ekle
+                for venue_data in all_venues_for_gemini[:10]:
+                    venue = {
+                        'id': venue_data['id'],
+                        'name': venue_data['name'],
+                        'description': venue_data['base_description'],
+                        'imageUrl': venue_data['imageUrl'],
+                        'category': 'Fine Dining',
+                        'vibeTags': venue_data.get('vibeTags', ['#FineDining', '#Gourmet']),
+                        'address': venue_data['address'],
+                        'priceRange': venue_data['priceRange'],
+                        'googleRating': venue_data.get('googleRating', 4.5),
+                        'googleReviewCount': venue_data.get('googleReviewCount', 0),
+                        'matchScore': venue_data['matchScore'],
+                        'noiseLevel': venue_data['noiseLevel'],
+                        'googleMapsUrl': venue_data['googleMapsUrl'],
+                        'isMichelinStarred': venue_data.get('isMichelinStarred', False),
+                        'googleReviews': venue_data.get('googleReviews', []),
+                        'website': venue_data.get('website', ''),
+                        'phoneNumber': venue_data.get('phoneNumber', ''),
+                        'hours': venue_data.get('hours', ''),
+                        'weeklyHours': venue_data.get('weeklyHours', []),
+                        'isOpenNow': venue_data.get('isOpenNow', None),
+                        'practicalInfo': {},
+                        'atmosphereSummary': {
+                            'noiseLevel': 'Sessiz',
+                            'lighting': 'Loş',
+                            'privacy': 'Özel',
+                            'energy': 'Sakin',
+                            'idealFor': ['romantik akşam', 'özel gün'],
+                            'notIdealFor': [],
+                            'oneLiner': 'Fine dining deneyimi sunan şık bir mekan.'
+                        }
+                    }
+                    venues.append(venue)
+
+        print(f"✅ API'den {len(venues)} fine dining restoran geldi", file=sys.stderr, flush=True)
+
+        # ===== CACHE'E KAYDET =====
+        if venues:
+            save_venues_to_cache(
+                venues=venues,
+                category_name='Fine Dining',
+                city=city,
+                district=selected_district
+            )
+
+        # ===== HYBRID: CACHE + API VENUE'LARINI BİRLEŞTİR =====
+        combined_venues = []
+        for cv in cached_venues:
+            if len(combined_venues) < 10:
+                combined_venues.append(cv)
+        existing_ids = {v.get('id') for v in combined_venues}
+        for av in venues:
+            if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+                combined_venues.append(av)
+                existing_ids.add(av.get('id'))
+
+        print(f"🔀 HYBRID Fine Dining - Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
+
+        return Response(combined_venues, status=status.HTTP_200_OK)
 
     except Exception as e:
         print(f"❌ Fine Dining generation error: {e}", file=sys.stderr, flush=True)
@@ -1898,16 +2233,31 @@ def generate_mock_venues(category, location, filters):
 
 
 def generate_street_food_places(location, filters, exclude_ids):
-    """Sokak Lezzeti kategorisi için çoklu sorgu - her yemek türü için ayrı arama yaparak çeşitlilik sağla"""
+    """Sokak Lezzeti kategorisi için çoklu sorgu - her yemek türü için ayrı arama yaparak çeşitlilik sağla
+    Gemini ile practicalInfo, atmosphereSummary ve enriched description eklenir.
+    """
     import json
     import sys
     import requests
+    import re
 
     city = location['city']
     districts = location.get('districts', [])
     neighborhoods = location.get('neighborhoods', [])
     selected_district = districts[0] if districts else None
     selected_neighborhood = neighborhoods[0] if neighborhoods else None
+
+    # ===== HYBRID CACHE SİSTEMİ =====
+    exclude_ids_set = set(exclude_ids) if exclude_ids else set()
+    cached_venues, all_cached_ids = get_cached_venues_for_hybrid(
+        category_name='Sokak Lezzeti',
+        city=city,
+        district=selected_district,
+        exclude_ids=exclude_ids_set,
+        limit=CACHE_VENUES_LIMIT
+    )
+    api_exclude_ids = exclude_ids_set | all_cached_ids
+    print(f"🔀 HYBRID - Sokak Lezzeti Cache: {len(cached_venues)}, API exclude: {len(api_exclude_ids)}", file=sys.stderr, flush=True)
 
     # Lokasyon string'i oluştur
     if selected_neighborhood:
@@ -2033,24 +2383,28 @@ def generate_street_food_places(location, filters, exclude_ids):
                     price_map = {1: '$', 2: '$$', 3: '$$$', 4: '$$$$'}
                     price_range = price_map.get(price_level, '$')
 
-                    # Yorumları formatla
-                    reviews = []
+                    # Yorumları formatla (googleReviews formatı - frontend ile uyumlu)
+                    google_reviews = []
                     raw_reviews = place.get('reviews', [])
-                    for review in raw_reviews[:3]:
-                        reviews.append({
-                            'author': review.get('authorAttribution', {}).get('displayName', 'Anonim'),
+                    for review in raw_reviews[:5]:
+                        google_reviews.append({
+                            'authorName': review.get('authorAttribution', {}).get('displayName', 'Anonim'),
                             'rating': review.get('rating', 5),
                             'text': review.get('text', {}).get('text', ''),
-                            'time': review.get('relativePublishTimeDescription', '')
+                            'relativeTime': review.get('relativePublishTimeDescription', ''),
+                            'profilePhotoUrl': review.get('authorAttribution', {}).get('photoUri', '')
                         })
 
                     # Vibe tags
                     vibe_tags = ['#SokakLezzeti', f'#{food_type.replace(" ", "")}', '#Yerel']
 
+                    # Çalışma saatleri
+                    opening_hours = place.get('currentOpeningHours', {})
+
                     venue = {
                         'id': place_id,
                         'name': place_name,
-                        'description': f"{place_name}, {food_type.lower()} konusunda bölgenin en sevilen sokak lezzeti duraklarından biri.",
+                        'base_description': f"{place_name}, {food_type.lower()} konusunda bölgenin en sevilen sokak lezzeti duraklarından biri.",
                         'imageUrl': photo_url or 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=800',
                         'category': 'Sokak Lezzeti',
                         'vibeTags': vibe_tags,
@@ -2060,20 +2414,15 @@ def generate_street_food_places(location, filters, exclude_ids):
                         'googleReviewCount': place_review_count,
                         'matchScore': min(95, int(place_rating * 20 + min(place_review_count / 50, 10))),
                         'noiseLevel': 55,
-                        'metrics': {
-                            'ambiance': 70,
-                            'accessibility': 85,
-                            'popularity': min(95, int(place_review_count / 10))
-                        },
                         'googleMapsUrl': google_maps_url,
-                        'reviews': reviews,
-                        'foodType': food_type
+                        'googleReviews': google_reviews,
+                        'google_reviews': google_reviews,  # Gemini için
+                        'foodType': food_type,
+                        'weeklyHours': opening_hours.get('weekdayDescriptions', []),
+                        'isOpenNow': opening_hours.get('openNow', None),
+                        'website': place.get('websiteUri', ''),
+                        'phoneNumber': place.get('internationalPhoneNumber', '')
                     }
-
-                    # Çalışma saatleri
-                    opening_hours = place.get('currentOpeningHours', {})
-                    venue['weeklyHours'] = opening_hours.get('weekdayDescriptions', [])
-                    venue['isOpenNow'] = opening_hours.get('openNow', None)
 
                     venues.append(venue)
                     added_ids.add(place_id)
@@ -2086,9 +2435,203 @@ def generate_street_food_places(location, filters, exclude_ids):
         # Puana ve yorum sayısına göre sırala
         venues.sort(key=lambda x: (x['googleRating'], x['googleReviewCount']), reverse=True)
 
-        print(f"🌯 Toplam {len(venues)} sokak lezzeti mekanı bulundu", file=sys.stderr, flush=True)
+        print(f"🌯 Toplam {len(venues)} sokak lezzeti mekanı bulundu, Gemini ile zenginleştiriliyor...", file=sys.stderr, flush=True)
 
-        return Response(venues, status=status.HTTP_200_OK)
+        # Gemini ile practicalInfo ve atmosphereSummary ekle
+        if venues:
+            # Pratik bilgi içeren yorumları öncelikli seç
+            practical_keywords = ['otopark', 'park', 'vale', 'valet', 'rezervasyon', 'bekle', 'sıra', 'kuyruk',
+                                  'kalabalık', 'sakin', 'sessiz', 'gürültü', 'çocuk', 'bebek', 'aile',
+                                  'vejetaryen', 'vegan', 'alkol', 'rakı', 'şarap', 'bira', 'servis',
+                                  'hızlı', 'yavaş', 'pahalı', 'ucuz', 'fiyat', 'hesap', 'bahçe', 'teras', 'dış mekan', 'nakit']
+
+            places_list_items = []
+            for i, v in enumerate(venues[:10]):
+                reviews_text = ""
+                if v.get('google_reviews'):
+                    all_reviews = v['google_reviews']
+                    practical_reviews = []
+                    other_reviews = []
+                    for r in all_reviews:
+                        text = r.get('text', '').lower()
+                        if any(kw in text for kw in practical_keywords):
+                            practical_reviews.append(r)
+                        else:
+                            other_reviews.append(r)
+                    selected_reviews = practical_reviews[:3] + other_reviews[:2]
+                    top_reviews = [r.get('text', '')[:350] for r in selected_reviews if r.get('text')]
+                    if top_reviews:
+                        reviews_text = f" | Yorumlar: {' /// '.join(top_reviews)}"
+
+                food_note = f" | Lezzet: {v.get('foodType', '')}"
+                places_list_items.append(
+                    f"{i+1}. {v['name']} | Rating: {v.get('googleRating', 'N/A')}{food_note}{reviews_text}"
+                )
+            places_list = "\n".join(places_list_items)
+
+            batch_prompt = f"""Kategori: Sokak Lezzeti
+Kullanıcı Tercihleri: Sokak lezzeti, hızlı yemek, yerel lezzetler
+
+Mekanlar ve Yorumları:
+{places_list}
+
+Her mekan için analiz yap ve JSON döndür:
+{{
+  "name": "Mekan Adı",
+  "description": "2 cümle Türkçe - mekanın öne çıkan özelliği, imza lezzeti",
+  "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
+  "practicalInfo": {{
+    "reservationNeeded": null,
+    "crowdLevel": "Sakin" | "Orta" | "Kalabalık" | null,
+    "waitTime": "Bekleme yok" | "10-15 dk" | "20-30 dk" | null,
+    "parking": "Kolay" | "Zor" | "Otopark var" | "Yok" | null,
+    "hasValet": true | false | null,
+    "outdoorSeating": true | false | null,
+    "kidFriendly": true | false | null,
+    "vegetarianOptions": true | false | null,
+    "alcoholServed": false,
+    "serviceSpeed": "Hızlı" | "Normal" | "Yavaş" | null,
+    "priceFeeling": "Fiyatına Değer" | "Biraz Pahalı" | "Uygun" | null,
+    "mustTry": "İmza yemek" | null,
+    "headsUp": "Önemli uyarı (sadece nakit, vs.)" | null
+  }},
+  "atmosphereSummary": {{
+    "noiseLevel": "Sessiz" | "Sohbet Dostu" | "Canlı" | "Gürültülü",
+    "lighting": "Loş" | "Yumuşak" | "Aydınlık",
+    "privacy": "Özel" | "Yarı Özel" | "Açık Alan",
+    "energy": "Sakin" | "Dengeli" | "Enerjik",
+    "idealFor": ["hızlı öğün", "gece atıştırmalığı", "arkadaş buluşması"],
+    "notIdealFor": ["romantik akşam"],
+    "oneLiner": "Tek cümle Türkçe atmosfer özeti"
+  }}
+}}
+
+practicalInfo Kuralları (YORUMLARDAN ÇIKAR):
+- reservationNeeded: Sokak lezzeti için genelde null (rezervasyon olmaz)
+- crowdLevel: "Kalabalık", "sıra var" → "Kalabalık". "Sakin" → "Sakin"
+- waitTime: "Sıra", "kuyruk", "bekledik" → süreyi tahmin et
+- parking: "Otopark", "park yeri" → "Otopark var". "Park zor", "park yok" → "Zor". "Park kolay" → "Kolay". Sokak lezzeti genelde "Zor" veya null
+- hasValet: "Vale", "valet" → true. Sokak lezzeti için genelde null
+- serviceSpeed: Sokak lezzeti genelde "Hızlı"
+- priceFeeling: "Ucuz", "uygun" → "Uygun". "Pahalı" → "Biraz Pahalı"
+- mustTry: Yorumlarda en çok övülen yemek
+- headsUp: Sadece nakit, temizlik uyarısı vb.
+
+atmosphereSummary Kuralları:
+- noiseLevel: Sokak lezzeti genelde "Canlı" veya "Gürültülü"
+- lighting: Sokak lezzeti genelde "Aydınlık"
+- privacy: Sokak lezzeti genelde "Açık Alan"
+- energy: Sokak lezzeti genelde "Enerjik"
+- idealFor: Max 3 - "hızlı öğün", "gece atıştırmalığı", "arkadaş buluşması", "ekonomik yemek"
+- notIdealFor: Max 2 - "romantik akşam", "iş yemeği", "özel gün"
+- oneLiner: Tek cümle atmosfer özeti
+
+SADECE JSON ARRAY döndür, başka açıklama yazma."""
+
+            try:
+                model = get_genai_model()
+                if model:
+                    response = model.generate_content(batch_prompt)
+                    response_text = response.text.strip()
+
+                    # Güvenli JSON parse
+                    response_text = re.sub(r'```json\s*|\s*```', '', response_text)
+                    response_text = response_text.strip()
+
+                    try:
+                        ai_results = json.loads(response_text)
+                    except json.JSONDecodeError:
+                        match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                        if match:
+                            ai_results = json.loads(match.group())
+                        else:
+                            print(f"⚠️ Sokak Lezzeti JSON parse edilemedi, fallback kullanılıyor", file=sys.stderr, flush=True)
+                            ai_results = []
+
+                    # AI sonuçlarını mekanlarla eşleştir
+                    ai_by_name = {r.get('name', '').lower(): r for r in ai_results}
+
+                    final_venues = []
+                    for venue_data in venues[:10]:
+                        ai_data = ai_by_name.get(venue_data['name'].lower(), {})
+
+                        venue = {
+                            'id': venue_data['id'],
+                            'name': venue_data['name'],
+                            'description': ai_data.get('description', venue_data['base_description']),
+                            'imageUrl': venue_data['imageUrl'],
+                            'category': 'Sokak Lezzeti',
+                            'vibeTags': ai_data.get('vibeTags', venue_data.get('vibeTags', ['#SokakLezzeti'])),
+                            'address': venue_data['address'],
+                            'priceRange': venue_data['priceRange'],
+                            'googleRating': venue_data.get('googleRating', 4.0),
+                            'googleReviewCount': venue_data.get('googleReviewCount', 0),
+                            'matchScore': venue_data['matchScore'],
+                            'noiseLevel': venue_data['noiseLevel'],
+                            'googleMapsUrl': venue_data['googleMapsUrl'],
+                            'googleReviews': venue_data.get('googleReviews', []),
+                            'website': venue_data.get('website', ''),
+                            'phoneNumber': venue_data.get('phoneNumber', ''),
+                            'weeklyHours': venue_data.get('weeklyHours', []),
+                            'isOpenNow': venue_data.get('isOpenNow', None),
+                            'foodType': venue_data.get('foodType', ''),
+                            'practicalInfo': ai_data.get('practicalInfo', {}),
+                            'atmosphereSummary': ai_data.get('atmosphereSummary', {
+                                'noiseLevel': 'Canlı',
+                                'lighting': 'Aydınlık',
+                                'privacy': 'Açık Alan',
+                                'energy': 'Enerjik',
+                                'idealFor': ['hızlı öğün', 'gece atıştırmalığı'],
+                                'notIdealFor': ['romantik akşam'],
+                                'oneLiner': 'Sokak lezzeti deneyimi sunan popüler bir mekan.'
+                            })
+                        }
+                        final_venues.append(venue)
+
+                    print(f"✅ Gemini ile {len(final_venues)} Sokak Lezzeti mekan zenginleştirildi", file=sys.stderr, flush=True)
+                    return Response(final_venues, status=status.HTTP_200_OK)
+
+            except Exception as e:
+                print(f"❌ Gemini Sokak Lezzeti hatası: {e}", file=sys.stderr, flush=True)
+                # Fallback: Gemini olmadan mekanları döndür
+                for venue_data in venues:
+                    venue_data['description'] = venue_data.pop('base_description', venue_data.get('description', ''))
+                    venue_data['practicalInfo'] = {}
+                    venue_data['atmosphereSummary'] = {
+                        'noiseLevel': 'Canlı',
+                        'lighting': 'Aydınlık',
+                        'privacy': 'Açık Alan',
+                        'energy': 'Enerjik',
+                        'idealFor': ['hızlı öğün'],
+                        'notIdealFor': [],
+                        'oneLiner': 'Sokak lezzeti deneyimi sunan popüler bir mekan.'
+                    }
+
+        # ===== CACHE'E KAYDET (sadece API'den gelen yeni venue'lar) =====
+        if venues:
+            save_venues_to_cache(
+                venues=venues,
+                category_name='Sokak Lezzeti',
+                city=city,
+                district=selected_district,
+                neighborhood=selected_neighborhood
+            )
+
+        # ===== HYBRID: CACHE + API VENUE'LARINI BİRLEŞTİR =====
+        combined_venues = []
+        # Önce cache'ten gelenleri ekle
+        for cv in cached_venues:
+            if len(combined_venues) < 10:
+                combined_venues.append(cv)
+        # Sonra API'den gelenleri ekle (duplicate olmayanları)
+        existing_ids = {v.get('id') for v in combined_venues}
+        for av in venues:
+            if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+                combined_venues.append(av)
+                existing_ids.add(av.get('id'))
+
+        print(f"🔀 HYBRID RESULT - Sokak Lezzeti Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
+        return Response(combined_venues, status=status.HTTP_200_OK)
 
     except Exception as e:
         print(f"❌ Street food generation error: {e}", file=sys.stderr, flush=True)
@@ -2101,16 +2644,31 @@ def generate_street_food_places(location, filters, exclude_ids):
 
 
 def generate_party_venues(location, filters, exclude_ids):
-    """Eğlence & Parti kategorisi için çoklu sorgu - her mekan türü için ayrı arama yaparak çeşitlilik sağla"""
+    """Eğlence & Parti kategorisi için çoklu sorgu - her mekan türü için ayrı arama yaparak çeşitlilik sağla
+    Gemini ile practicalInfo, atmosphereSummary ve enriched description eklenir.
+    """
     import json
     import sys
     import requests
+    import re
 
     city = location['city']
     districts = location.get('districts', [])
     neighborhoods = location.get('neighborhoods', [])
     selected_district = districts[0] if districts else None
     selected_neighborhood = neighborhoods[0] if neighborhoods else None
+
+    # ===== HYBRID CACHE SİSTEMİ =====
+    exclude_ids_set = set(exclude_ids) if exclude_ids else set()
+    cached_venues, all_cached_ids = get_cached_venues_for_hybrid(
+        category_name='Eğlence & Parti',
+        city=city,
+        district=selected_district,
+        exclude_ids=exclude_ids_set,
+        limit=CACHE_VENUES_LIMIT
+    )
+    api_exclude_ids = exclude_ids_set | all_cached_ids
+    print(f"🔀 HYBRID - Eğlence & Parti Cache: {len(cached_venues)}, API exclude: {len(api_exclude_ids)}", file=sys.stderr, flush=True)
 
     # Lokasyon string'i oluştur
     if selected_neighborhood:
@@ -2378,7 +2936,7 @@ def generate_party_venues(location, filters, exclude_ids):
                     venue = {
                         'id': place_id,
                         'name': place_name,
-                        'description': f"{place_name}, {search_location} bölgesinin popüler {venue_type.lower()} mekanlarından biri.",
+                        'base_description': f"{place_name}, {search_location} bölgesinin popüler {venue_type.lower()} mekanlarından biri.",
                         'imageUrl': photo_url or 'https://images.unsplash.com/photo-1566737236500-c8ac43014a67?w=800',
                         'category': 'Eğlence & Parti',
                         'vibeTags': vibe_tags,
@@ -2387,15 +2945,9 @@ def generate_party_venues(location, filters, exclude_ids):
                         'googleRating': place_rating,
                         'googleReviewCount': place_review_count,
                         'googleReviews': google_reviews,
+                        'google_reviews': google_reviews,  # Gemini için
                         'matchScore': min(98, int(place_rating * 18 + min(place_review_count / 100, 15) + party_bonus)),
                         'noiseLevel': 75,
-                        'metrics': {
-                            'noise': 80,
-                            'light': 40,
-                            'privacy': 30,
-                            'service': 70,
-                            'energy': 85
-                        },
                         'googleMapsUrl': google_maps_url,
                         'website': place.get('websiteUri', ''),
                         'phoneNumber': place.get('internationalPhoneNumber', ''),
@@ -2417,9 +2969,223 @@ def generate_party_venues(location, filters, exclude_ids):
         # Puana ve yorum sayısına göre sırala
         venues.sort(key=lambda x: (x['googleRating'], x['googleReviewCount']), reverse=True)
 
-        print(f"🪩 Toplam {len(venues)} eğlence mekanı bulundu", file=sys.stderr, flush=True)
+        print(f"🪩 Toplam {len(venues)} eğlence mekanı bulundu, Gemini ile zenginleştiriliyor...", file=sys.stderr, flush=True)
 
-        return Response(venues, status=status.HTTP_200_OK)
+        # Gemini ile practicalInfo ve atmosphereSummary ekle
+        if venues:
+            # Pratik bilgi içeren yorumları öncelikli seç
+            practical_keywords = ['otopark', 'park', 'vale', 'valet', 'rezervasyon', 'bekle', 'sıra', 'kuyruk',
+                                  'kalabalık', 'sakin', 'sessiz', 'gürültü', 'dress code', 'yaş', 'giriş',
+                                  'alkol', 'kokteyl', 'bira', 'servis', 'dj', 'müzik', 'dans',
+                                  'hızlı', 'yavaş', 'pahalı', 'ucuz', 'fiyat', 'hesap', 'bahçe', 'teras']
+
+            places_list_items = []
+            for i, v in enumerate(venues[:10]):
+                reviews_text = ""
+                if v.get('google_reviews'):
+                    all_reviews = v['google_reviews']
+                    practical_reviews = []
+                    other_reviews = []
+                    for r in all_reviews:
+                        text = r.get('text', '').lower()
+                        if any(kw in text for kw in practical_keywords):
+                            practical_reviews.append(r)
+                        else:
+                            other_reviews.append(r)
+                    selected_reviews = practical_reviews[:3] + other_reviews[:2]
+                    top_reviews = [r.get('text', '')[:350] for r in selected_reviews if r.get('text')]
+                    if top_reviews:
+                        reviews_text = f" | Yorumlar: {' /// '.join(top_reviews)}"
+
+                venue_note = f" | Tür: {v.get('venueType', '')}"
+                places_list_items.append(
+                    f"{i+1}. {v['name']} | Rating: {v.get('googleRating', 'N/A')}{venue_note}{reviews_text}"
+                )
+            places_list = "\n".join(places_list_items)
+
+            batch_prompt = f"""Kategori: Eğlence & Parti
+Kullanıcı Tercihleri: Gece hayatı, dans, parti, eğlence
+
+Mekanlar ve Yorumları:
+{places_list}
+
+Her mekan için analiz yap ve JSON döndür:
+{{
+  "name": "Mekan Adı",
+  "description": "2 cümle Türkçe - mekanın parti atmosferi, DJ/müzik tarzı",
+  "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
+  "practicalInfo": {{
+    "reservationNeeded": "Tavsiye Edilir" | "Şart" | "Gerekli Değil" | null,
+    "crowdLevel": "Sakin" | "Orta" | "Kalabalık" | null,
+    "waitTime": "Bekleme yok" | "10-15 dk" | "20-30 dk" | null,
+    "parking": "Kolay" | "Zor" | "Otopark var" | "Yok" | null,
+    "hasValet": true | false | null,
+    "outdoorSeating": true | false | null,
+    "kidFriendly": false,
+    "vegetarianOptions": null,
+    "alcoholServed": true,
+    "serviceSpeed": "Hızlı" | "Normal" | "Yavaş" | null,
+    "priceFeeling": "Fiyatına Değer" | "Biraz Pahalı" | "Uygun" | null,
+    "mustTry": "İmza kokteyl veya deneyim" | null,
+    "headsUp": "Önemli uyarı (dress code, yaş sınırı, vs.)" | null
+  }},
+  "atmosphereSummary": {{
+    "noiseLevel": "Sessiz" | "Sohbet Dostu" | "Canlı" | "Gürültülü",
+    "lighting": "Loş" | "Yumuşak" | "Aydınlık",
+    "privacy": "Özel" | "Yarı Özel" | "Açık Alan",
+    "energy": "Sakin" | "Dengeli" | "Enerjik",
+    "idealFor": ["parti gecesi", "dans", "arkadaş grubu"],
+    "notIdealFor": ["romantik akşam", "sessiz sohbet"],
+    "oneLiner": "Tek cümle Türkçe atmosfer özeti"
+  }}
+}}
+
+practicalInfo Kuralları (YORUMLARDAN ÇIKAR):
+- reservationNeeded: VIP/masa için "Şart", genel giriş için "Gerekli Değil"
+- crowdLevel: Gece kulübü genelde "Kalabalık"
+- parking: "Otopark", "park yeri" → "Otopark var". "Park zor", "park yok" → "Zor". Gece kulübü genelde "Zor"
+- hasValet: "Vale", "valet" → true. Yoksa null veya false
+- kidFriendly: Gece kulübü/bar için HER ZAMAN false
+- alcoholServed: Gece kulübü/bar için HER ZAMAN true
+- headsUp: Dress code, yaş sınırı (21+), giriş ücreti vb.
+
+atmosphereSummary Kuralları:
+- noiseLevel: Gece kulübü genelde "Gürültülü", lounge "Canlı"
+- lighting: Gece kulübü genelde "Loş"
+- privacy: Genelde "Açık Alan" veya "Yarı Özel"
+- energy: Parti mekanı genelde "Enerjik"
+- idealFor: Max 3 - "parti gecesi", "dans", "arkadaş grubu", "bekarlığa veda", "DJ gecesi"
+- notIdealFor: Max 2 - "romantik akşam", "sessiz sohbet", "aile yemeği"
+- oneLiner: Tek cümle atmosfer özeti
+
+SADECE JSON ARRAY döndür, başka açıklama yazma."""
+
+            try:
+                model = get_genai_model()
+                if model:
+                    response = model.generate_content(batch_prompt)
+                    response_text = response.text.strip()
+
+                    # Güvenli JSON parse
+                    response_text = re.sub(r'```json\s*|\s*```', '', response_text)
+                    response_text = response_text.strip()
+
+                    try:
+                        ai_results = json.loads(response_text)
+                    except json.JSONDecodeError:
+                        match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                        if match:
+                            ai_results = json.loads(match.group())
+                        else:
+                            print(f"⚠️ Eğlence & Parti JSON parse edilemedi, fallback kullanılıyor", file=sys.stderr, flush=True)
+                            ai_results = []
+
+                    # AI sonuçlarını mekanlarla eşleştir
+                    ai_by_name = {r.get('name', '').lower(): r for r in ai_results}
+
+                    final_venues = []
+                    for venue_data in venues[:10]:
+                        ai_data = ai_by_name.get(venue_data['name'].lower(), {})
+
+                        venue = {
+                            'id': venue_data['id'],
+                            'name': venue_data['name'],
+                            'description': ai_data.get('description', venue_data['base_description']),
+                            'imageUrl': venue_data['imageUrl'],
+                            'category': 'Eğlence & Parti',
+                            'vibeTags': ai_data.get('vibeTags', venue_data.get('vibeTags', ['#Eğlence'])),
+                            'address': venue_data['address'],
+                            'priceRange': venue_data['priceRange'],
+                            'googleRating': venue_data.get('googleRating', 4.0),
+                            'googleReviewCount': venue_data.get('googleReviewCount', 0),
+                            'matchScore': venue_data['matchScore'],
+                            'noiseLevel': venue_data['noiseLevel'],
+                            'googleMapsUrl': venue_data['googleMapsUrl'],
+                            'googleReviews': venue_data.get('googleReviews', []),
+                            'website': venue_data.get('website', ''),
+                            'phoneNumber': venue_data.get('phoneNumber', ''),
+                            'hours': venue_data.get('hours', ''),
+                            'weeklyHours': venue_data.get('weeklyHours', []),
+                            'isOpenNow': venue_data.get('isOpenNow', None),
+                            'venueType': venue_data.get('venueType', ''),
+                            'practicalInfo': ai_data.get('practicalInfo', {}),
+                            'atmosphereSummary': ai_data.get('atmosphereSummary', {
+                                'noiseLevel': 'Gürültülü',
+                                'lighting': 'Loş',
+                                'privacy': 'Açık Alan',
+                                'energy': 'Enerjik',
+                                'idealFor': ['parti gecesi', 'dans'],
+                                'notIdealFor': ['romantik akşam'],
+                                'oneLiner': 'Enerjik parti atmosferi sunan popüler bir mekan.'
+                            })
+                        }
+                        final_venues.append(venue)
+
+                    print(f"✅ Gemini ile {len(final_venues)} Eğlence & Parti mekan zenginleştirildi", file=sys.stderr, flush=True)
+
+                    # ===== CACHE'E KAYDET (sadece API'den gelen yeni venue'lar) =====
+                    if final_venues:
+                        save_venues_to_cache(
+                            venues=final_venues,
+                            category_name='Eğlence & Parti',
+                            city=city,
+                            district=selected_district,
+                            neighborhood=selected_neighborhood
+                        )
+
+                    # ===== HYBRID: CACHE + API VENUE'LARINI BİRLEŞTİR =====
+                    combined_venues = []
+                    for cv in cached_venues:
+                        if len(combined_venues) < 10:
+                            combined_venues.append(cv)
+                    existing_ids = {v.get('id') for v in combined_venues}
+                    for av in final_venues:
+                        if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+                            combined_venues.append(av)
+                            existing_ids.add(av.get('id'))
+
+                    print(f"🔀 HYBRID RESULT - Eğlence & Parti Cache: {len(cached_venues)}, API: {len(final_venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
+                    return Response(combined_venues, status=status.HTTP_200_OK)
+
+            except Exception as e:
+                print(f"❌ Gemini Eğlence & Parti hatası: {e}", file=sys.stderr, flush=True)
+                # Fallback: Gemini olmadan mekanları döndür
+                for venue_data in venues:
+                    venue_data['description'] = venue_data.pop('base_description', venue_data.get('description', ''))
+                    venue_data['practicalInfo'] = {}
+                    venue_data['atmosphereSummary'] = {
+                        'noiseLevel': 'Gürültülü',
+                        'lighting': 'Loş',
+                        'privacy': 'Açık Alan',
+                        'energy': 'Enerjik',
+                        'idealFor': ['parti gecesi'],
+                        'notIdealFor': [],
+                        'oneLiner': 'Enerjik parti atmosferi sunan popüler bir mekan.'
+                    }
+
+        # ===== CACHE'E KAYDET (Fallback - sadece API'den gelen yeni venue'lar) =====
+        if venues:
+            save_venues_to_cache(
+                venues=venues,
+                category_name='Eğlence & Parti',
+                city=city,
+                district=selected_district,
+                neighborhood=selected_neighborhood
+            )
+
+        # ===== HYBRID: CACHE + API VENUE'LARINI BİRLEŞTİR =====
+        combined_venues = []
+        for cv in cached_venues:
+            if len(combined_venues) < 10:
+                combined_venues.append(cv)
+        existing_ids = {v.get('id') for v in combined_venues}
+        for av in venues:
+            if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+                combined_venues.append(av)
+                existing_ids.add(av.get('id'))
+
+        print(f"🔀 HYBRID RESULT - Eğlence & Parti (Fallback) Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
+        return Response(combined_venues, status=status.HTTP_200_OK)
 
     except Exception as e:
         print(f"❌ Party venues generation error: {e}", file=sys.stderr, flush=True)
@@ -2653,7 +3419,7 @@ def generate_venues(request):
 
         # Fine Dining kategorisi için özel işlem - önce Michelin restoranları
         if category['name'] == 'Fine Dining':
-            return generate_fine_dining_with_michelin(location, filters)
+            return generate_fine_dining_with_michelin(location, filters, exclude_ids)
 
         # Yerel Festivaller kategorisi için özel işlem
         if category['name'] == 'Yerel Festivaller':
@@ -2686,6 +3452,26 @@ def generate_venues(request):
         # Eğlence & Parti kategorisi için özel işlem - çoklu sorgu
         if category['name'] == 'Eğlence & Parti':
             return generate_party_venues(location, filters, exclude_ids)
+
+        # ===== HYBRID CACHE SİSTEMİ =====
+        # Cache'ten 5 venue + API'den taze venue'lar = Toplam 10 venue
+        city = location.get('city', 'İzmir')
+        districts = location.get('districts', [])
+        selected_district = districts[0] if districts else None
+
+        # Cache'ten venue'ları ve tüm cache'li place_id'leri al
+        cached_venues, all_cached_ids = get_cached_venues_for_hybrid(
+            category_name=category['name'],
+            city=city,
+            district=selected_district,
+            exclude_ids=exclude_ids,
+            limit=CACHE_VENUES_LIMIT
+        )
+
+        # API çağrısında cache'teki venue'ları exclude et (tekrar çekmemek için)
+        api_exclude_ids = (exclude_ids or set()) | all_cached_ids
+
+        print(f"🔀 HYBRID - Cache: {len(cached_venues)} venue, API exclude: {len(api_exclude_ids)} ID", file=sys.stderr, flush=True)
 
         # Kategori bazlı query mapping (Tatil, Michelin, Festivaller, Adrenalin, Hafta Sonu Gezintisi, Sahne Sanatları, Konserler ve Sokak Lezzeti hariç)
         # ALKOL FİLTRESİNE GÖRE DİNAMİK QUERY OLUŞTUR
@@ -2963,6 +3749,40 @@ def generate_venues(request):
                     print(f"❌ ALKOLSÜZ REJECT (isim) - {place_name}: alkollü isimli", file=sys.stderr, flush=True)
                     continue
 
+            # ===== KAPALI MEKAN KONTROLÜ (TÜM KATEGORİLER) =====
+            # Kalıcı veya geçici kapalı mekanları hariç tut
+            business_status = place.get('businessStatus', 'OPERATIONAL')
+            if business_status in ['CLOSED_PERMANENTLY', 'CLOSED_TEMPORARILY']:
+                print(f"❌ KAPALI MEKAN REJECT - {place_name}: {business_status}", file=sys.stderr, flush=True)
+                continue
+
+            # ===== ESKİ YORUM KONTROLÜ (TÜM KATEGORİLER) =====
+            # 7 aydır yorum gelmemişse muhtemelen kapalı - filtrele
+            # NOT: 50+ yorumu olan popüler mekanlar bu kontrolden muaf (sezonluk mekanlar için)
+            if place_review_count < 50:
+                raw_reviews = place.get('reviews', [])
+                if raw_reviews:
+                    from datetime import datetime, timedelta
+                    seven_months_ago = datetime.now() - timedelta(days=210)  # 7 ay
+
+                    # En güncel yorumu bul
+                    latest_review_time = None
+                    for review in raw_reviews:
+                        publish_time_str = review.get('publishTime', '')
+                        if publish_time_str:
+                            try:
+                                review_time = datetime.fromisoformat(publish_time_str.replace('Z', '+00:00'))
+                                review_time = review_time.replace(tzinfo=None)
+                                if latest_review_time is None or review_time > latest_review_time:
+                                    latest_review_time = review_time
+                            except:
+                                pass
+
+                    # En güncel yorum 7 aydan eski mi?
+                    if latest_review_time and latest_review_time < seven_months_ago:
+                        print(f"❌ ESKİ YORUM REJECT - {place_name}: son yorum {latest_review_time.strftime('%Y-%m-%d')} (7 aydan eski)", file=sys.stderr, flush=True)
+                        continue
+
             # ===== TEKEL/MARKET FİLTRESİ =====
             # Tüm kategorilerde tekel, market, bakkal gibi yerleri hariç tut
             tekel_keywords = [
@@ -3166,14 +3986,33 @@ def generate_venues(request):
             print(f"📋 Gemini BATCH çağrısı - {len(filtered_places)} mekan, filtreler: {preferences_text}", file=sys.stderr, flush=True)
 
             # Tüm mekanları tek bir prompt'ta gönder - YORUMLARLA BİRLİKTE
+            # Pratik bilgi içeren yorumları öncelikli seç
+            practical_keywords = ['otopark', 'park', 'vale', 'valet', 'rezervasyon', 'bekle', 'sıra', 'kuyruk',
+                                  'kalabalık', 'sakin', 'sessiz', 'gürültü', 'çocuk', 'bebek', 'aile',
+                                  'vejetaryen', 'vegan', 'alkol', 'rakı', 'şarap', 'bira', 'servis',
+                                  'hızlı', 'yavaş', 'pahalı', 'ucuz', 'fiyat', 'hesap', 'bahçe', 'teras', 'dış mekan']
+
             places_list_items = []
             for i, p in enumerate(filtered_places[:10]):
-                # İlk 2 yorumu al (vibe analizi için çok önemli)
                 reviews_text = ""
                 if p.get('google_reviews'):
-                    top_reviews = [r.get('text', '')[:100] for r in p['google_reviews'][:2] if r.get('text')]
+                    all_reviews = p['google_reviews']
+
+                    # Pratik bilgi içeren yorumları bul
+                    practical_reviews = []
+                    other_reviews = []
+                    for r in all_reviews:
+                        text = r.get('text', '').lower()
+                        if any(kw in text for kw in practical_keywords):
+                            practical_reviews.append(r)
+                        else:
+                            other_reviews.append(r)
+
+                    # Pratik bilgi içerenlerden 3 + diğerlerinden en güncel 2 (toplam max 5)
+                    selected_reviews = practical_reviews[:3] + other_reviews[:2]
+                    top_reviews = [r.get('text', '')[:350] for r in selected_reviews if r.get('text')]
                     if top_reviews:
-                        reviews_text = f" | Yorumlar: {' / '.join(top_reviews)}"
+                        reviews_text = f" | Yorumlar: {' /// '.join(top_reviews)}"
 
                 places_list_items.append(
                     f"{i+1}. {p['name']} | Tip: {', '.join(p['types'][:2])} | Rating: {p.get('rating', 'N/A')}{reviews_text}"
@@ -3205,14 +4044,6 @@ Her mekan için analiz yap ve JSON döndür:
   "isRelevant": true/false,
   "description": "2 cümle Türkçe - mekanın öne çıkan özelliği",
   "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
-  "noiseLevel": 20-80,
-  "metrics": {{
-    "noise": 20-80,
-    "energy": 20-80,
-    "service": 40-90,
-    "light": 30-80,
-    "privacy": 20-80
-  }},
   "contextScore": {{
     "first_date": 0-100,
     "business_meal": 0-100,
@@ -3225,7 +4056,30 @@ Her mekan için analiz yap ve JSON döndür:
     "breakfast_brunch": 0-100,
     "after_work": 0-100
   }},
-  "bestTimeSlots": ["breakfast", "lunch", "dinner", "late_night"]
+  "practicalInfo": {{
+    "reservationNeeded": "Tavsiye Edilir" | "Şart" | "Gerekli Değil" | null,
+    "crowdLevel": "Sakin" | "Orta" | "Kalabalık" | null,
+    "waitTime": "Bekleme yok" | "10-15 dk" | "20-30 dk" | null,
+    "parking": "Kolay" | "Zor" | "Otopark var" | "Yok" | null,
+    "hasValet": true | false | null,
+    "outdoorSeating": true | false | null,
+    "kidFriendly": true | false | null,
+    "vegetarianOptions": true | false | null,
+    "alcoholServed": true | false | null,
+    "serviceSpeed": "Hızlı" | "Normal" | "Yavaş" | null,
+    "priceFeeling": "Fiyatına Değer" | "Biraz Pahalı" | "Uygun" | null,
+    "mustTry": "Yorumlarda öne çıkan yemek/içecek" | null,
+    "headsUp": "Bilmeniz gereken önemli uyarı" | null
+  }},
+  "atmosphereSummary": {{
+    "noiseLevel": "Sessiz" | "Sohbet Dostu" | "Canlı" | "Gürültülü",
+    "lighting": "Loş" | "Yumuşak" | "Aydınlık",
+    "privacy": "Özel" | "Yarı Özel" | "Açık Alan",
+    "energy": "Sakin" | "Dengeli" | "Enerjik",
+    "idealFor": ["romantik akşam", "ilk buluşma", "arkadaş buluşması"],
+    "notIdealFor": ["aile yemeği"],
+    "oneLiner": "Tek cümle Türkçe atmosfer özeti"
+  }}
 }}
 
 Context Skorlama Kuralları:
@@ -3240,12 +4094,37 @@ Context Skorlama Kuralları:
 - breakfast_brunch: Kahvaltı/brunch için uygunluk.
 - after_work: İş çıkışı için uygun, rahatlatıcı.
 
+practicalInfo Kuralları (YORUMLARDAN ÇIKAR):
+- reservationNeeded: "Rezervasyon şart", "çok kalabalık", "yer bulmak zor" → "Şart". "Rezervasyon tavsiye" → "Tavsiye Edilir"
+- crowdLevel: "Sakin", "sessiz", "rahat" → "Sakin". "Kalabalık", "gürültülü", "dolu" → "Kalabalık"
+- waitTime: "Bekledik", "sıra", "kuyruk" → süreyi tahmin et. Hiç bahsedilmemişse null
+- parking: "Otopark", "park yeri" → "Otopark var". "Park zor", "park yok" → "Zor". "Park kolay" → "Kolay". Hiç bahsedilmemişse null
+- hasValet: "Vale", "valet" → true. Yoksa null
+- outdoorSeating: "Bahçe", "dış mekan", "teras" → true
+- kidFriendly: "Çocuklu", "aile", "çocuk menüsü" → true. "Bar", "gece kulübü" → false
+- vegetarianOptions: "Vejetaryen", "vegan", "sebze" → true
+- alcoholServed: "Rakı", "şarap", "bira", "kokteyl" → true
+- serviceSpeed: "Hızlı", "geç geldi", "bekledik" → ilgili değeri seç
+- priceFeeling: "Pahalı", "ucuz", "fiyatına değer" → seç
+- mustTry: Yorumlarda en çok övülen yemek/içecek (varsa)
+- headsUp: Önemli uyarılar (nakit, kredi kartı, köpek yasak, vb.)
+
+atmosphereSummary Kuralları:
+- noiseLevel: "Sessiz" (fısıltıyla konuşulur), "Sohbet Dostu" (rahat sohbet), "Canlı" (biraz ses), "Gürültülü" (zor duyulur)
+- lighting: "Loş" (mum ışığı, romantik), "Yumuşak" (orta aydınlık), "Aydınlık" (net görüş)
+- privacy: "Özel" (köşe masalar, separeler), "Yarı Özel" (normal düzen), "Açık Alan" (yakın masalar)
+- energy: "Sakin" (dinlendirici), "Dengeli" (orta tempo), "Enerjik" (hareketli)
+- idealFor: Max 3 seçenek - "romantik akşam", "ilk buluşma", "iş yemeği", "arkadaş buluşması", "aile yemeği", "sessiz sohbet", "kutlama", "solo yemek"
+- notIdealFor: Max 2 seçenek - yukarıdaki listeden
+- oneLiner: Tek cümle Türkçe - atmosfer + kime uygun özeti. Örnek: "Loş ışıklı, samimi köşeleriyle romantik akşam yemekleri için ideal"
+
 Önemli:
 - Bir mekan birden fazla context'te yüksek skor alabilir
 - isRelevant=false olanları JSON'a DAHİL ETME
 - Skor 50'nin altındaysa o context için uygun değil demektir
 - Yorumları dikkate al (atmosfer, kalabalık, servis hakkında ipuçları içerir)
 - vibeTags Türkçe ve # ile başlamalı
+- practicalInfo bilgileri YALNIZCA yorumlardan çıkarılmalı, yoksa null yaz
 
 SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
@@ -3310,8 +4189,17 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                             'hours': place.get('hours', ''),
                             'weeklyHours': place.get('weeklyHours', []),
                             'isOpenNow': place.get('isOpenNow', None),
-                            'metrics': ai_data.get('metrics', {'noise': 50, 'energy': 50, 'service': 70, 'light': 60, 'privacy': 50}),
-                            'isMichelinStarred': is_michelin_restaurant(place['name']) is not None
+                            'isMichelinStarred': is_michelin_restaurant(place['name']) is not None,
+                            'practicalInfo': ai_data.get('practicalInfo', {}),
+                            'atmosphereSummary': ai_data.get('atmosphereSummary', {
+                                'noiseLevel': 'Sohbet Dostu',
+                                'lighting': 'Yumuşak',
+                                'privacy': 'Yarı Özel',
+                                'energy': 'Dengeli',
+                                'idealFor': [],
+                                'notIdealFor': [],
+                                'oneLiner': ''
+                            })
                         }
 
                         # contextScore'dan bestFor oluştur (70+ skorlu context'ler)
@@ -3361,15 +4249,55 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                         'hours': place.get('hours', ''),
                         'weeklyHours': place.get('weeklyHours', []),
                         'isOpenNow': place.get('isOpenNow', None),
-                        'metrics': {'noise': 50, 'energy': 50, 'service': 70, 'light': 60, 'privacy': 50},
-                        'isMichelinStarred': is_michelin_restaurant(place['name']) is not None
+                        'isMichelinStarred': is_michelin_restaurant(place['name']) is not None,
+                        'practicalInfo': {},
+                        'atmosphereSummary': {
+                            'noiseLevel': 'Sohbet Dostu',
+                            'lighting': 'Yumuşak',
+                            'privacy': 'Yarı Özel',
+                            'energy': 'Dengeli',
+                            'idealFor': [],
+                            'notIdealFor': [],
+                            'oneLiner': ''
+                        }
                     }
                     venues.append(venue)
 
         # Match score'a göre sırala
         venues.sort(key=lambda x: x['matchScore'], reverse=True)
 
-        print(f"DEBUG - Total venues: {len(venues)}", file=sys.stderr, flush=True)
+        print(f"DEBUG - API'den gelen venues: {len(venues)}", file=sys.stderr, flush=True)
+
+        # ===== API VENUE'LARINI CACHE'E KAYDET =====
+        if venues:
+            neighborhoods = location.get('neighborhoods', [])
+            selected_neighborhood = neighborhoods[0] if neighborhoods else None
+            save_venues_to_cache(
+                venues=venues,
+                category_name=category['name'],
+                city=city,
+                district=selected_district,
+                neighborhood=selected_neighborhood
+            )
+
+        # ===== HYBRID: CACHE + API VENUE'LARINI BİRLEŞTİR =====
+        # Cache venue'ları başta, API venue'ları sonra
+        # Toplam 10 venue hedefliyoruz
+        combined_venues = []
+
+        # Önce cache'ten gelenleri ekle
+        for cv in cached_venues:
+            if len(combined_venues) < 10:
+                combined_venues.append(cv)
+
+        # Sonra API'den gelenleri ekle (tekrar olmaması için ID kontrolü yap)
+        existing_ids = {v.get('id') for v in combined_venues}
+        for av in venues:
+            if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+                combined_venues.append(av)
+                existing_ids.add(av.get('id'))
+
+        print(f"🔀 HYBRID RESULT - Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
 
         # Arama geçmişine kaydet
         if request.user.is_authenticated:
@@ -3378,10 +4306,10 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                 query=search_query,
                 intent=category['name'],
                 location=search_location,
-                results_count=len(venues)
+                results_count=len(combined_venues)
             )
 
-        return Response(venues, status=status.HTTP_200_OK)
+        return Response(combined_venues, status=status.HTTP_200_OK)
 
     except Exception as e:
         import traceback
