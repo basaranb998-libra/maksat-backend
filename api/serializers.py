@@ -72,6 +72,7 @@ class LocationSerializer(serializers.Serializer):
     """Konum bilgisi"""
     city = serializers.CharField()
     districts = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    neighborhoods = serializers.ListField(child=serializers.CharField(), required=False, default=list)
 
 
 class FiltersSerializer(serializers.Serializer):

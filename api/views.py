@@ -514,17 +514,16 @@ def generate_fine_dining_with_michelin(location, filters):
     city = location['city']
     districts = location.get('districts', [])
     neighborhoods = location.get('neighborhoods', [])
-    district = districts[0] if districts else None
-    neighborhood = neighborhoods[0] if neighborhoods else None
 
-    if neighborhood:
-        search_location = f"{neighborhood}, {district}, {city}"
-    elif district:
-        search_location = f"{district}, {city}"
+    # Birden fazla ilçe için search locations oluştur
+    search_locations = []
+    if districts:
+        for d in districts:
+            search_locations.append(f"{d}, {city}")
     else:
-        search_location = city
+        search_locations.append(city)
 
-    print(f"🍽️ Fine Dining + Michelin araması: {search_location}", file=sys.stderr, flush=True)
+    print(f"🍽️ Fine Dining + Michelin araması: {search_locations}", file=sys.stderr, flush=True)
 
     # Michelin Guide Türkiye 2024 - İlgili şehir için
     MICHELIN_DATABASE = {
@@ -577,9 +576,10 @@ def generate_fine_dining_with_michelin(location, filters):
         # 1. ADIM: Şehirdeki Michelin restoranlarını al
         city_michelin = MICHELIN_DATABASE.get(city, [])
 
-        # İlçe filtresi varsa uygula
-        if district:
-            city_michelin = [r for r in city_michelin if r['district'].lower() == district.lower()]
+        # İlçe filtresi varsa uygula (birden fazla ilçe destekli)
+        if districts:
+            districts_lower = [d.lower() for d in districts]
+            city_michelin = [r for r in city_michelin if r['district'].lower() in districts_lower]
 
         # Michelin restoranları ekle (yıldız sayısına göre sırala)
         def michelin_sort_key(r):
@@ -643,6 +643,7 @@ def generate_fine_dining_with_michelin(location, filters):
         print(f"✅ {len(venues)} Michelin restoran eklendi", file=sys.stderr, flush=True)
 
         # 2. ADIM: Google Places'dan ek fine dining restoranlar
+        # Birden fazla sorgu yaparak gizli cevherleri de yakala
         if len(venues) < 10:
             remaining_slots = 10 - len(venues)
 
@@ -650,79 +651,135 @@ def generate_fine_dining_with_michelin(location, filters):
             headers = {
                 "Content-Type": "application/json",
                 "X-Goog-Api-Key": settings.GOOGLE_MAPS_API_KEY,
-                "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours"
+                "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours,places.businessStatus"
             }
 
-            payload = {
-                "textQuery": f"fine dining restaurant upscale gourmet in {search_location}, Turkey",
-                "languageCode": "tr",
-                "maxResultCount": remaining_slots + 5  # Ekstra al, filtrele
-            }
+            # Her lokasyon için sorgu yap
+            query_templates = [
+                "fine dining restaurant upscale gourmet in {loc}, Turkey",
+                "italian restaurant trattoria osteria in {loc}, Turkey",
+                "tasting menu degustasyon chef restaurant in {loc}, Turkey",
+                "romantic dinner wine restaurant bistro in {loc}, Turkey",
+            ]
 
-            print(f"🔍 Google Places fine dining araması: {payload['textQuery']}", file=sys.stderr, flush=True)
+            all_places = []
+            for search_loc in search_locations:
+                for template in query_templates:
+                    if len(all_places) >= remaining_slots + 15:
+                        break
 
-            try:
-                response = requests.post(url, json=payload, headers=headers)
-                if response.status_code == 200:
-                    places_data = response.json()
-                    places_list = places_data.get('places', [])
+                    query = template.format(loc=search_loc)
+                    payload = {
+                        "textQuery": query,
+                        "languageCode": "tr",
+                        "maxResultCount": 6
+                    }
+                    print(f"🔍 Fine dining araması: {query}", file=sys.stderr, flush=True)
 
-                    for idx, place in enumerate(places_list):
-                        if len(venues) >= 10:
-                            break
+                    try:
+                        response = requests.post(url, json=payload, headers=headers)
+                        if response.status_code == 200:
+                            places_data = response.json()
+                            places_list = places_data.get('places', [])
 
-                        place_name = place.get('displayName', {}).get('text', '')
-                        place_address = place.get('formattedAddress', '')
-                        place_rating = place.get('rating', 0)
+                            for place in places_list:
+                                place_name = place.get('displayName', {}).get('text', '')
+                                place_name_lower = place_name.lower()
+                                place_address = place.get('formattedAddress', '')
+                                place_rating = place.get('rating', 0)
+                                place_types = place.get('types', [])
 
-                        # Zaten Michelin listesinde varsa atla
-                        if place_name.lower() in added_names:
-                            continue
+                                # Zaten eklenmiş mi?
+                                if place_name_lower in added_names:
+                                    continue
 
-                        # Düşük puanlı mekanları atla
-                        if place_rating < 4.2:
-                            continue
+                                # İlçe filtresi - seçilen ilçelerden birinde olmalı
+                                if districts:
+                                    address_lower = place_address.lower()
+                                    address_normalized = address_lower.replace('ı', 'i').replace('ş', 's').replace('ğ', 'g').replace('ü', 'u').replace('ö', 'o').replace('ç', 'c')
 
-                        # Fotoğraf URL'si
-                        photo_url = 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800'
-                        if place.get('photos'):
-                            photo_name = place['photos'][0].get('name', '')
-                            if photo_name:
-                                photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?maxHeightPx=800&maxWidthPx=800&key={settings.GOOGLE_MAPS_API_KEY}"
+                                    district_match = False
+                                    for d in districts:
+                                        d_lower = d.lower()
+                                        d_normalized = d_lower.replace('ı', 'i').replace('ş', 's').replace('ğ', 'g').replace('ü', 'u').replace('ö', 'o').replace('ç', 'c')
+                                        if d_lower in address_lower or d_normalized in address_normalized:
+                                            district_match = True
+                                            break
 
-                        # Michelin kontrolü
-                        michelin_info = is_michelin_restaurant(place_name)
+                                    if not district_match:
+                                        print(f"❌ Fine Dining İLÇE REJECT - {place_name}: seçilen ilçelerde değil", file=sys.stderr, flush=True)
+                                        continue
 
-                        venue = {
-                            'id': f"fd_{idx+1}",
-                            'name': place_name,
-                            'description': f"Fine dining deneyimi sunan şık ve kaliteli bir restoran.",
-                            'imageUrl': photo_url,
-                            'category': 'Fine Dining',
-                            'vibeTags': ['#FineDining', '#Gourmet'],
-                            'address': place_address,
-                            'priceRange': '$$$',
-                            'googleRating': place_rating,
-                            'googleReviewCount': place.get('userRatingCount', 0),
-                            'matchScore': 85,
-                            'noiseLevel': 35,
-                            'metrics': {'noise': 35, 'light': 60, 'privacy': 65, 'service': 85, 'energy': 50},
-                            'googleMapsUrl': f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(place_name + ' ' + city)}",
-                            'isMichelinStarred': michelin_info is not None
-                        }
+                                # Düşük puanlı mekanları atla
+                                if place_rating < 4.2:
+                                    continue
 
-                        # Çalışma saatleri
-                        opening_hours = place.get('currentOpeningHours', {})
-                        venue['weeklyHours'] = opening_hours.get('weekdayDescriptions', [])
-                        venue['isOpenNow'] = opening_hours.get('openNow', None)
+                                # Pastacılık, fırın gibi Fine Dining olmayan yerleri filtrele
+                                excluded_keywords = [
+                                    'pastane', 'pasta atölyesi', 'butik pasta', 'patisserie',
+                                    'bakery', 'fırın', 'börek', 'simit', 'kafeterya'
+                                ]
+                                excluded_types = ['bakery', 'cafe', 'meal_takeaway', 'fast_food_restaurant']
 
-                        venues.append(venue)
-                        added_names.add(place_name.lower())
+                                is_excluded_name = any(kw in place_name_lower for kw in excluded_keywords)
+                                is_excluded_type = any(t in place_types for t in excluded_types) and 'restaurant' not in place_types
 
-                    print(f"✅ Toplam {len(venues)} fine dining restoran", file=sys.stderr, flush=True)
+                                if is_excluded_name or is_excluded_type:
+                                    print(f"❌ Fine Dining REJECT - {place_name}: uygun değil", file=sys.stderr, flush=True)
+                                    continue
 
-            except Exception as e:
-                print(f"⚠️ Google Places API hatası: {e}", file=sys.stderr, flush=True)
+                                all_places.append(place)
+                                added_names.add(place_name_lower)
+
+                    except Exception as e:
+                        print(f"⚠️ Fine dining sorgu hatası: {e}", file=sys.stderr, flush=True)
+
+            print(f"📊 Toplam {len(all_places)} unique mekan bulundu", file=sys.stderr, flush=True)
+
+            # Rating'e göre sırala ve venue'lara ekle
+            all_places.sort(key=lambda x: x.get('rating', 0), reverse=True)
+
+            for idx, place in enumerate(all_places[:remaining_slots]):
+                place_name = place.get('displayName', {}).get('text', '')
+                place_address = place.get('formattedAddress', '')
+                place_rating = place.get('rating', 0)
+
+                # Fotoğraf URL'si
+                photo_url = 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800'
+                if place.get('photos'):
+                    photo_name = place['photos'][0].get('name', '')
+                    if photo_name:
+                        photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?maxHeightPx=800&maxWidthPx=800&key={settings.GOOGLE_MAPS_API_KEY}"
+
+                # Michelin kontrolü
+                michelin_info = is_michelin_restaurant(place_name)
+
+                venue = {
+                    'id': f"fd_{idx+1}",
+                    'name': place_name,
+                    'description': f"Fine dining deneyimi sunan şık ve kaliteli bir restoran.",
+                    'imageUrl': photo_url,
+                    'category': 'Fine Dining',
+                    'vibeTags': ['#FineDining', '#Gourmet'],
+                    'address': place_address,
+                    'priceRange': '$$$',
+                    'googleRating': place_rating,
+                    'googleReviewCount': place.get('userRatingCount', 0),
+                    'matchScore': 85,
+                    'noiseLevel': 35,
+                    'metrics': {'noise': 35, 'light': 60, 'privacy': 65, 'service': 85, 'energy': 50},
+                    'googleMapsUrl': f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(place_name + ' ' + city)}",
+                    'isMichelinStarred': michelin_info is not None
+                }
+
+                # Çalışma saatleri
+                opening_hours = place.get('currentOpeningHours', {})
+                venue['weeklyHours'] = opening_hours.get('weekdayDescriptions', [])
+                venue['isOpenNow'] = opening_hours.get('openNow', None)
+
+                venues.append(venue)
+
+            print(f"✅ Toplam {len(venues)} fine dining restoran", file=sys.stderr, flush=True)
 
         return Response(venues, status=status.HTTP_200_OK)
 
@@ -1886,7 +1943,7 @@ def generate_street_food_places(location, filters, exclude_ids):
                 headers = {
                     "Content-Type": "application/json",
                     "X-Goog-Api-Key": settings.GOOGLE_MAPS_API_KEY,
-                    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours"
+                    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours,places.businessStatus"
                 }
 
                 payload = {
@@ -2043,6 +2100,337 @@ def generate_street_food_places(location, filters, exclude_ids):
         )
 
 
+def generate_party_venues(location, filters, exclude_ids):
+    """Eğlence & Parti kategorisi için çoklu sorgu - her mekan türü için ayrı arama yaparak çeşitlilik sağla"""
+    import json
+    import sys
+    import requests
+
+    city = location['city']
+    districts = location.get('districts', [])
+    neighborhoods = location.get('neighborhoods', [])
+    selected_district = districts[0] if districts else None
+    selected_neighborhood = neighborhoods[0] if neighborhoods else None
+
+    # Lokasyon string'i oluştur
+    if selected_neighborhood:
+        search_location = f"{selected_neighborhood}, {selected_district}, {city}"
+    elif selected_district:
+        search_location = f"{selected_district}, {city}"
+    else:
+        search_location = city
+
+    print(f"🪩 Eğlence & Parti (Multi-Query): {search_location}", file=sys.stderr, flush=True)
+
+    # Her mekan türü için ayrı sorgu - dans, DJ, parti odaklı
+    party_queries = [
+        ('nightclub gece kulübü club', 'Gece Kulübü'),
+        ('DJ party club', 'DJ & Party'),
+        ('beach club party', 'Beach Club'),
+        ('dance club elektronik müzik', 'Dans Kulübü'),
+        ('rooftop bar party', 'Rooftop'),
+        ('club lounge DJ', 'Lounge Club'),
+    ]
+
+    venues = []
+    added_ids = set()
+
+    # Pavyon/konsomatris filtresi için keywords
+    pavyon_keywords = [
+        'pavyon', 'konsomatris', 'gazino', 'casino', 'kabare', 'cabaret',
+        'gece alemi', 'eglence merkezi', 'dans bar', 'show bar',
+        'strip', 'striptiz', 'hostess', 'escort', 'masaj salonu',
+        'gentlemen', 'club 18', 'club18', 'adult', 'yetiskin'
+    ]
+
+    # Dans kursu/topluluk filtresi için keywords
+    dance_school_keywords = [
+        'dans kursu', 'dans okulu', 'dans toplulugu', 'dans atolyesi',
+        'dance school', 'dance studio', 'dance class', 'dance academy',
+        'salsa kursu', 'tango kursu', 'bale', 'ballet', 'zumba',
+        'latin dans', 'halk danslari', 'folklor'
+    ]
+
+    # Müzik okulu/merkezi filtresi - parti mekanı değil
+    music_school_keywords = [
+        'muzik merkezi', 'müzik merkezi', 'muzik okulu', 'müzik okulu',
+        'konservatuar', 'conservatory', 'music school', 'music center',
+        'muzik kursu', 'müzik kursu', 'enstruman', 'enstrüman',
+        'piyano kursu', 'gitar kursu', 'keman kursu', 'bateri kursu',
+        'ses egitimi', 'vokal', 'koro', 'choir'
+    ]
+
+    try:
+        for query_term, venue_type in party_queries:
+            try:
+                url = "https://places.googleapis.com/v1/places:searchText"
+                headers = {
+                    "Content-Type": "application/json",
+                    "X-Goog-Api-Key": settings.GOOGLE_MAPS_API_KEY,
+                    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours,places.businessStatus"
+                }
+
+                payload = {
+                    "textQuery": f"{query_term} in {search_location}, Turkey",
+                    "languageCode": "tr",
+                    "maxResultCount": 10  # Her kategori için 10 sonuç
+                }
+
+                print(f"🔍 Sorgu: {query_term} in {search_location}", file=sys.stderr, flush=True)
+
+                response = requests.post(url, json=payload, headers=headers)
+
+                if response.status_code != 200:
+                    print(f"⚠️ API hatası ({query_term}): {response.status_code}", file=sys.stderr, flush=True)
+                    continue
+
+                places_data = response.json()
+                places = places_data.get('places', [])
+
+                for place in places:
+                    place_id = place.get('id', '')
+                    place_name = place.get('displayName', {}).get('text', '')
+                    place_address = place.get('formattedAddress', '')
+                    place_rating = place.get('rating', 0)
+                    place_review_count = place.get('userRatingCount', 0)
+                    place_types = place.get('types', [])
+
+                    # Daha önce eklendiyse atla
+                    if place_id in added_ids:
+                        continue
+
+                    # Exclude IDs kontrolü
+                    if place_id in exclude_ids:
+                        print(f"⏭️ EXCLUDE - {place_name}: zaten gösterildi", file=sys.stderr, flush=True)
+                        continue
+
+                    # Kalıcı/geçici kapalı mekan kontrolü
+                    business_status = place.get('businessStatus', 'OPERATIONAL')
+                    if business_status in ['CLOSED_PERMANENTLY', 'CLOSED_TEMPORARILY']:
+                        print(f"❌ KAPALI MEKAN REJECT - {place_name}: {business_status}", file=sys.stderr, flush=True)
+                        continue
+
+                    # Son 7 aydır yorum gelmemişse kapalı say
+                    raw_reviews = place.get('reviews', [])
+                    if raw_reviews:
+                        from datetime import datetime, timedelta
+                        seven_months_ago = datetime.now() - timedelta(days=210)  # 7 ay
+
+                        latest_review_time = None
+                        for review in raw_reviews:
+                            publish_time_str = review.get('publishTime', '')
+                            if publish_time_str:
+                                try:
+                                    review_time = datetime.fromisoformat(publish_time_str.replace('Z', '+00:00'))
+                                    review_time = review_time.replace(tzinfo=None)
+                                    if latest_review_time is None or review_time > latest_review_time:
+                                        latest_review_time = review_time
+                                except:
+                                    pass
+
+                        if latest_review_time and latest_review_time < seven_months_ago:
+                            print(f"❌ ESKİ YORUM REJECT - {place_name}: son yorum {latest_review_time.strftime('%Y-%m-%d')} (7 aydan eski)", file=sys.stderr, flush=True)
+                            continue
+
+                    # İlçe kontrolü
+                    if selected_district:
+                        address_lower = place_address.lower()
+                        district_lower = selected_district.lower()
+                        district_normalized = district_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                        address_normalized = address_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+
+                        # Alaçatı için özel kontrol (Çeşme içinde)
+                        is_alacati = 'alaçatı' in address_lower or 'alacati' in address_normalized
+                        is_in_district = district_lower in address_lower or district_normalized in address_normalized
+
+                        if not is_in_district and not (selected_district.lower() == 'çeşme' and is_alacati):
+                            print(f"❌ İLÇE REJECT - {place_name}: {selected_district} içermiyor", file=sys.stderr, flush=True)
+                            continue
+
+                    # Pavyon/konsomatris filtresi
+                    place_name_lower = place_name.lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                    place_types_str = ' '.join(place_types).lower()
+
+                    is_pavyon_name = any(keyword in place_name_lower for keyword in pavyon_keywords)
+                    is_pavyon_type = any(keyword in place_types_str for keyword in pavyon_keywords)
+
+                    if is_pavyon_name or is_pavyon_type:
+                        print(f"❌ PAVYON REJECT - {place_name}", file=sys.stderr, flush=True)
+                        continue
+
+                    # Dans kursu/topluluk filtresi
+                    is_dance_school = any(keyword in place_name_lower for keyword in dance_school_keywords)
+                    dance_types = ['dance_studio', 'dance_school', 'gym', 'fitness_center']
+                    is_dance_type = any(t in place_types_str for t in dance_types)
+
+                    if is_dance_school or (is_dance_type and 'bar' not in place_types_str and 'night_club' not in place_types_str):
+                        print(f"❌ DANS KURSU REJECT - {place_name}", file=sys.stderr, flush=True)
+                        continue
+
+                    # Müzik okulu/merkezi filtresi
+                    is_music_school = any(keyword in place_name_lower for keyword in music_school_keywords)
+                    if is_music_school:
+                        print(f"❌ MÜZİK OKULU REJECT - {place_name}", file=sys.stderr, flush=True)
+                        continue
+
+                    # Parti/eğlence mekanı değilse filtrele (sade restoran, kafe, birahaneler)
+                    # Öncelik: night_club, beach, club, lounge, DJ içeren mekanlar
+                    party_positive_types = ['night_club', 'casino']
+                    party_positive_keywords = ['club', 'lounge', 'dj', 'party', 'disco', 'gece', 'beach', 'plaj']
+                    non_party_types = ['restaurant', 'cafe', 'meal_takeaway', 'bakery']
+
+                    is_party_type = any(t in place_types_str for t in party_positive_types)
+                    has_party_keyword = any(k in place_name_lower for k in party_positive_keywords)
+                    is_just_restaurant = any(t in place_types_str for t in non_party_types) and not is_party_type and not has_party_keyword
+
+                    # Sadece restoran/kafe ise ve parti keyword'ü yoksa reddet
+                    if is_just_restaurant and 'bar' not in place_types_str:
+                        print(f"❌ RESTORAN/KAFE REJECT - {place_name}: parti mekanı değil", file=sys.stderr, flush=True)
+                        continue
+
+                    # Rating filtresi - 3.5 ve üzeri (beach club'lar için esnek)
+                    if place_rating < 3.5:
+                        print(f"❌ RATING REJECT - {place_name}: {place_rating} < 3.5", file=sys.stderr, flush=True)
+                        continue
+
+                    # Review count filtresi - minimum 5
+                    if place_review_count < 5:
+                        print(f"❌ REVIEW COUNT REJECT - {place_name}: {place_review_count} < 5", file=sys.stderr, flush=True)
+                        continue
+
+                    # Tekel/Market filtresi
+                    tekel_keywords = ['tekel', 'market', 'bakkal', 'büfe', 'süpermarket', 'grocery', 'liquor store', 'convenience']
+                    tekel_types = ['liquor_store', 'convenience_store', 'grocery_store', 'supermarket']
+
+                    if any(t in place_types_str for t in tekel_types) or any(k in place_name_lower for k in tekel_keywords):
+                        print(f"❌ TEKEL REJECT - {place_name}", file=sys.stderr, flush=True)
+                        continue
+
+                    # Fotoğraf URL'si
+                    photo_url = None
+                    if place.get('photos') and len(place['photos']) > 0:
+                        photo_name = place['photos'][0].get('name', '')
+                        if photo_name:
+                            photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?key={settings.GOOGLE_MAPS_API_KEY}&maxWidthPx=800"
+
+                    # Google Maps URL
+                    maps_query = urllib.parse.quote(f"{place_name} {place_address}")
+                    google_maps_url = f"https://www.google.com/maps/search/?api=1&query={maps_query}"
+
+                    # Fiyat aralığı
+                    price_level_str = place.get('priceLevel', 'PRICE_LEVEL_MODERATE')
+                    price_level_map = {
+                        'PRICE_LEVEL_FREE': 1, 'PRICE_LEVEL_INEXPENSIVE': 1,
+                        'PRICE_LEVEL_MODERATE': 2, 'PRICE_LEVEL_EXPENSIVE': 3,
+                        'PRICE_LEVEL_VERY_EXPENSIVE': 4
+                    }
+                    price_level = price_level_map.get(price_level_str, 2)
+                    price_map = {1: '$$', 2: '$$', 3: '$$$', 4: '$$$$'}
+                    price_range = price_map.get(price_level, '$$')
+
+                    # Google Reviews formatla
+                    google_reviews = []
+                    raw_reviews = place.get('reviews', [])
+                    sorted_reviews = sorted(
+                        raw_reviews,
+                        key=lambda r: r.get('publishTime', ''),
+                        reverse=True
+                    )[:10]
+                    for review in sorted_reviews:
+                        google_reviews.append({
+                            'authorName': review.get('authorAttribution', {}).get('displayName', 'Anonim'),
+                            'rating': review.get('rating', 5),
+                            'text': review.get('text', {}).get('text', ''),
+                            'relativeTime': review.get('relativePublishTimeDescription', ''),
+                            'profilePhotoUrl': review.get('authorAttribution', {}).get('photoUri', ''),
+                            'publishTime': review.get('publishTime', '')
+                        })
+
+                    # Yorumlarda parti/DJ/canlı müzik geçiyor mu kontrol et
+                    party_keywords_in_reviews = ['dj', 'canlı müzik', 'canli muzik', 'live music', 'dans', 'dance',
+                                                  'parti', 'party', 'gece', 'eğlence', 'eglence', 'sahne',
+                                                  'performans', 'konser', 'müzik', 'muzik']
+                    all_review_text = ' '.join([r.get('text', {}).get('text', '').lower() for r in raw_reviews])
+                    party_keyword_matches = sum(1 for kw in party_keywords_in_reviews if kw in all_review_text)
+
+                    # Bonus puan: Yorumlarda parti keyword'leri varsa
+                    party_bonus = min(15, party_keyword_matches * 3)  # Her keyword için +3, max +15
+
+                    # Vibe tags
+                    vibe_tags = ['#Eğlence', f'#{venue_type.replace(" ", "")}', '#GeceHayatı']
+                    if 'beach' in query_term.lower():
+                        vibe_tags.append('#BeachClub')
+
+                    # Yorumlarda DJ/canlı müzik varsa tag ekle
+                    if 'dj' in all_review_text:
+                        vibe_tags.append('#DJ')
+                    if 'canlı müzik' in all_review_text or 'canli muzik' in all_review_text or 'live music' in all_review_text:
+                        vibe_tags.append('#CanlıMüzik')
+                    if 'dans' in all_review_text or 'dance' in all_review_text:
+                        vibe_tags.append('#Dans')
+
+                    # Çalışma saatleri
+                    opening_hours = place.get('currentOpeningHours', {})
+                    hours_list = opening_hours.get('weekdayDescriptions', [])
+                    hours_text = hours_list[0] if hours_list else ''
+                    is_open_now = opening_hours.get('openNow', None)
+
+                    venue = {
+                        'id': place_id,
+                        'name': place_name,
+                        'description': f"{place_name}, {search_location} bölgesinin popüler {venue_type.lower()} mekanlarından biri.",
+                        'imageUrl': photo_url or 'https://images.unsplash.com/photo-1566737236500-c8ac43014a67?w=800',
+                        'category': 'Eğlence & Parti',
+                        'vibeTags': vibe_tags,
+                        'address': place_address,
+                        'priceRange': price_range,
+                        'googleRating': place_rating,
+                        'googleReviewCount': place_review_count,
+                        'googleReviews': google_reviews,
+                        'matchScore': min(98, int(place_rating * 18 + min(place_review_count / 100, 15) + party_bonus)),
+                        'noiseLevel': 75,
+                        'metrics': {
+                            'noise': 80,
+                            'light': 40,
+                            'privacy': 30,
+                            'service': 70,
+                            'energy': 85
+                        },
+                        'googleMapsUrl': google_maps_url,
+                        'website': place.get('websiteUri', ''),
+                        'phoneNumber': place.get('internationalPhoneNumber', ''),
+                        'hours': hours_text,
+                        'weeklyHours': hours_list,
+                        'isOpenNow': is_open_now,
+                        'venueType': venue_type
+                    }
+
+                    venues.append(venue)
+                    added_ids.add(place_id)
+                    bonus_info = f" [+{party_bonus} parti bonus]" if party_bonus > 0 else ""
+                    print(f"✅ EKLENDI - {place_name} ({venue_type}): ⭐{place_rating} ({place_review_count} yorum){bonus_info}", file=sys.stderr, flush=True)
+
+            except Exception as e:
+                print(f"⚠️ {query_term} sorgusu hatası: {e}", file=sys.stderr, flush=True)
+                continue
+
+        # Puana ve yorum sayısına göre sırala
+        venues.sort(key=lambda x: (x['googleRating'], x['googleReviewCount']), reverse=True)
+
+        print(f"🪩 Toplam {len(venues)} eğlence mekanı bulundu", file=sys.stderr, flush=True)
+
+        return Response(venues, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"❌ Party venues generation error: {e}", file=sys.stderr, flush=True)
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
+        return Response(
+            {'error': f'Eğlence mekanları getirilirken hata: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def register(request):
@@ -2187,6 +2575,42 @@ def extract_instagram(url):
     return ''
 
 
+# Kategori -> Context mapping (context-based venue matching için)
+CATEGORY_TO_CONTEXT = {
+    "Fine Dining": "fine_dining",
+    "İlk Buluşma": "first_date",
+    "İş Yemeği": "business_meal",
+    "Muhabbet": "casual_hangout",
+    "Özel Gün": "special_occasion",
+    "Kahvaltı & Brunch": "breakfast_brunch",
+    "Aile Yemeği": "family_meal",
+    "Romantik Akşam": "romantic_dinner",
+    "İş Çıkışı Bira & Kokteyl": "after_work",
+    "Eğlence & Parti": "friends_hangout",
+    "Kafa Dinleme": "casual_hangout",
+    "3. Nesil Kahveci": "casual_hangout",
+    "Meyhane": "friends_hangout",
+    "Balıkçı": "fine_dining",
+}
+
+def sort_venues_by_context(venues, category_name):
+    """Context skoruna göre mekanları sıralar ve 50 altını filtreler"""
+    context_key = CATEGORY_TO_CONTEXT.get(category_name, "friends_hangout")
+
+    # Context skoru olan mekanları filtrele ve sırala
+    filtered = []
+    for v in venues:
+        context_score = v.get('contextScore', {})
+        score = context_score.get(context_key, 75)  # Default 75 (eğer contextScore yoksa)
+        if score >= 50:
+            v['matchScore'] = score  # matchScore'u context skoruyla güncelle
+            filtered.append(v)
+
+    # Context skoruna göre sırala
+    sorted_venues = sorted(filtered, key=lambda x: x['matchScore'], reverse=True)
+    return sorted_venues
+
+
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def generate_venues(request):
@@ -2259,6 +2683,10 @@ def generate_venues(request):
         if category['name'] == 'Sokak Lezzeti':
             return generate_street_food_places(location, filters, exclude_ids)
 
+        # Eğlence & Parti kategorisi için özel işlem - çoklu sorgu
+        if category['name'] == 'Eğlence & Parti':
+            return generate_party_venues(location, filters, exclude_ids)
+
         # Kategori bazlı query mapping (Tatil, Michelin, Festivaller, Adrenalin, Hafta Sonu Gezintisi, Sahne Sanatları, Konserler ve Sokak Lezzeti hariç)
         # ALKOL FİLTRESİNE GÖRE DİNAMİK QUERY OLUŞTUR
         alcohol_filter = filters.get('alcohol', 'Any')
@@ -2270,9 +2698,9 @@ def generate_venues(request):
                 'İş Yemeği': 'restaurant bar hotel lounge business lunch',
                 'Muhabbet': 'bar pub lounge restaurant wine bar',
                 'İş Çıkışı Bira & Kokteyl': 'bar pub cocktail bar beer garden',
-                'Eğlence & Parti': 'nightclub bar pub dance club',
+                'Eğlence & Parti': 'nightclub bar pub dance club beach club rooftop bar live music lounge',
                 'Özel Gün': 'fine dining restaurant wine bar romantic',
-                'Kahvaltı & Brunch': 'brunch restaurant bar mimosa',
+                'Kahvaltı & Brunch': 'kahvaltı brunch restaurant bar mimosa serpme kahvaltı',
                 'Kafa Dinleme': 'lounge bar quiet restaurant',
                 'Odaklanma': 'bar restaurant lounge',
                 'Aile Yemeği': 'restaurant bar casual dining',
@@ -2301,7 +2729,7 @@ def generate_venues(request):
                 'İş Çıkışı Bira & Kokteyl': 'cafe coffee shop juice bar',
                 'Eğlence & Parti': 'entertainment center arcade bowling',
                 'Özel Gün': 'restaurant cafe patisserie',
-                'Kahvaltı & Brunch': 'breakfast cafe brunch spot bakery',
+                'Kahvaltı & Brunch': 'kahvaltı breakfast brunch cafe serpme kahvaltı',
                 'Kafa Dinleme': 'quiet cafe tea house peaceful spot',
                 'Odaklanma': 'coworking space cafe library quiet study',
                 'Aile Yemeği': 'family restaurant cafe casual dining',
@@ -2326,9 +2754,9 @@ def generate_venues(request):
                 'İş Yemeği': 'business lunch restaurant cafe meeting spot',
                 'Muhabbet': 'cafe bar lounge restaurant cozy spot conversation friendly',
                 'İş Çıkışı Bira & Kokteyl': 'bar pub cocktail bar beer garden after work drinks',
-                'Eğlence & Parti': 'nightclub bar pub dance club entertainment',
+                'Eğlence & Parti': 'nightclub bar pub dance club beach club rooftop bar live music lounge entertainment',
                 'Özel Gün': 'fine dining restaurant romantic celebration',
-                'Kahvaltı & Brunch': 'breakfast cafe brunch spot bakery',
+                'Kahvaltı & Brunch': 'kahvaltı breakfast brunch cafe serpme kahvaltı',
                 'Kafa Dinleme': 'quiet cafe lounge peaceful spot relaxing',
                 'Odaklanma': 'coworking space cafe library quiet study',
                 'Aile Yemeği': 'family restaurant casual dining kid friendly',
@@ -2395,7 +2823,7 @@ def generate_venues(request):
                 headers = {
                     "Content-Type": "application/json",
                     "X-Goog-Api-Key": settings.GOOGLE_MAPS_API_KEY,
-                    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours"
+                    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours,places.businessStatus"
                 }
 
                 payload = {
@@ -2453,6 +2881,18 @@ def generate_venues(request):
 
                 if district_lower not in address_lower and district_normalized not in address_normalized:
                     print(f"❌ İLÇE REJECT - {place_name} adresi '{selected_district}' içermiyor: {place_address}", file=sys.stderr, flush=True)
+                    continue
+
+            # ===== MAHALLE/SEMT FİLTRESİ: Seçilen mahalleye ait olmayan mekanları atla =====
+            if selected_neighborhood:
+                address_lower = place_address.lower()
+                neighborhood_lower = selected_neighborhood.lower()
+                # Türkçe karakterleri normalize et
+                neighborhood_normalized = neighborhood_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                address_normalized = address_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+
+                if neighborhood_lower not in address_lower and neighborhood_normalized not in address_normalized:
+                    print(f"❌ MAHALLE REJECT - {place_name} adresi '{selected_neighborhood}' içermiyor: {place_address}", file=sys.stderr, flush=True)
                     continue
 
             # Fotoğraf URL'si
@@ -2546,7 +2986,7 @@ def generate_venues(request):
                 'İlk Buluşma', 'Fine Dining', 'Özel Gün', 'İş Yemeği', 'Öğlen Yemeği',
                 'Esnaf Lokantası', 'Balıkçı', 'Meyhane', 'Muhabbet', 'Brunch',
                 '3. Nesil Kahveci', 'İş Çıkışı Bira & Kokteyl', 'Sokak Lezzeti',
-                'Eğlence & Parti', 'Burger & Fast', 'Pizzacı'
+                'Burger & Fast', 'Pizzacı'
             ]
 
             if category_name in restaurant_categories:
@@ -2608,12 +3048,12 @@ def generate_venues(request):
 
                 # ===== RATING & REVIEW COUNT FİLTRESİ =====
                 # Eğlence & Parti kategorisi için düşük puanlı ve az yorumlu mekanları filtrele
-                if place_rating < 4.6:
-                    print(f"❌ RATING REJECT - {place_name}: rating={place_rating} < 4.6", file=sys.stderr, flush=True)
+                if place_rating < 3.5:
+                    print(f"❌ RATING REJECT - {place_name}: rating={place_rating} < 3.5", file=sys.stderr, flush=True)
                     continue
 
-                if place_review_count < 15:
-                    print(f"❌ REVIEW REJECT - {place_name}: reviews={place_review_count} < 15", file=sys.stderr, flush=True)
+                if place_review_count < 5:
+                    print(f"❌ REVIEW REJECT - {place_name}: reviews={place_review_count} < 5", file=sys.stderr, flush=True)
                     continue
 
             # ===== MEYHANE KATEGORİSİ FİLTRESİ =====
@@ -2725,11 +3165,20 @@ def generate_venues(request):
             preferences_text = ", ".join(user_preferences) if user_preferences else "Özel tercih yok"
             print(f"📋 Gemini BATCH çağrısı - {len(filtered_places)} mekan, filtreler: {preferences_text}", file=sys.stderr, flush=True)
 
-            # Tüm mekanları tek bir prompt'ta gönder
-            places_list = "\n".join([
-                f"{i+1}. {p['name']} | Tip: {', '.join(p['types'][:2])}"
-                for i, p in enumerate(filtered_places[:10])  # Max 10 mekan
-            ])
+            # Tüm mekanları tek bir prompt'ta gönder - YORUMLARLA BİRLİKTE
+            places_list_items = []
+            for i, p in enumerate(filtered_places[:10]):
+                # İlk 2 yorumu al (vibe analizi için çok önemli)
+                reviews_text = ""
+                if p.get('google_reviews'):
+                    top_reviews = [r.get('text', '')[:100] for r in p['google_reviews'][:2] if r.get('text')]
+                    if top_reviews:
+                        reviews_text = f" | Yorumlar: {' / '.join(top_reviews)}"
+
+                places_list_items.append(
+                    f"{i+1}. {p['name']} | Tip: {', '.join(p['types'][:2])} | Rating: {p.get('rating', 'N/A')}{reviews_text}"
+                )
+            places_list = "\n".join(places_list_items)
 
             # Balıkçı kategorisi için özel talimat
             balikci_instruction = ""
@@ -2744,22 +3193,61 @@ Kullanıcı ALKOLLÜ balık restoranı istiyor. Aşağıdaki mekanları DİKKATL
 """
 
             batch_prompt = f"""Kategori: {category['name']}
-Filtreler: {preferences_text}
+Kullanıcı Tercihleri: {preferences_text}
 {balikci_instruction}
-Aşağıdaki mekanları analiz et ve her biri için JSON döndür:
+
+Mekanlar ve Yorumları:
 {places_list}
 
-Her mekan için şu formatta JSON objesi oluştur:
-{{"name": "Mekan Adı", "isRelevant": true/false, "description": "2 cümle Türkçe açıklama", "vibeTags": ["#Tag1", "#Tag2", "#Tag3"], "noiseLevel": 30-70, "matchScore": 75-95, "metrics": {{"noise": 20-80, "energy": 20-80, "service": 40-90, "light": 30-80, "privacy": 20-80}}}}
+Her mekan için analiz yap ve JSON döndür:
+{{
+  "name": "Mekan Adı",
+  "isRelevant": true/false,
+  "description": "2 cümle Türkçe - mekanın öne çıkan özelliği",
+  "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
+  "noiseLevel": 20-80,
+  "metrics": {{
+    "noise": 20-80,
+    "energy": 20-80,
+    "service": 40-90,
+    "light": 30-80,
+    "privacy": 20-80
+  }},
+  "contextScore": {{
+    "first_date": 0-100,
+    "business_meal": 0-100,
+    "casual_hangout": 0-100,
+    "fine_dining": 0-100,
+    "romantic_dinner": 0-100,
+    "friends_hangout": 0-100,
+    "family_meal": 0-100,
+    "special_occasion": 0-100,
+    "breakfast_brunch": 0-100,
+    "after_work": 0-100
+  }},
+  "bestTimeSlots": ["breakfast", "lunch", "dinner", "late_night"]
+}}
 
-metrics açıklamaları:
-- noise: Gürültü seviyesi (20=sessiz, 80=gürültülü)
-- energy: Ortam enerjisi (20=sakin, 80=enerjik)
-- service: Hizmet hızı/kalitesi (40=yavaş, 90=hızlı ve kaliteli)
-- light: Aydınlatma (30=loş, 80=aydınlık)
-- privacy: Mahremiyet (20=kalabalık, 80=özel)
+Context Skorlama Kuralları:
+- first_date: Gürültü düşük, mahremiyet yüksek, görsel olarak etkileyici mekanlar.
+- business_meal: Sessiz, hızlı servis, profesyonel atmosfer.
+- casual_hangout: Rahat, samimi, arkadaş ortamı.
+- fine_dining: Sunum kalitesi, servis, atmosfer, craft/artisan yaklaşımı. El yapımı lezzetler, butik mekan, şef konsepti = yüksek skor.
+- romantic_dinner: Loş ışık, mahremiyet, özel atmosfer.
+- friends_hangout: Enerjik, sosyal, rahat.
+- family_meal: Çocuk dostu, geniş alan, rahat menü.
+- special_occasion: Kutlama için uygun, özel deneyim sunan.
+- breakfast_brunch: Kahvaltı/brunch için uygunluk.
+- after_work: İş çıkışı için uygun, rahatlatıcı.
 
-JSON ARRAY olarak döndür. Sadece uygun mekanları dahil et. SADECE JSON ARRAY, başka bir şey yazma."""
+Önemli:
+- Bir mekan birden fazla context'te yüksek skor alabilir
+- isRelevant=false olanları JSON'a DAHİL ETME
+- Skor 50'nin altındaysa o context için uygun değil demektir
+- Yorumları dikkate al (atmosfer, kalabalık, servis hakkında ipuçları içerir)
+- vibeTags Türkçe ve # ile başlamalı
+
+SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
             try:
                 model = get_genai_model()
@@ -2767,13 +3255,22 @@ JSON ARRAY olarak döndür. Sadece uygun mekanları dahil et. SADECE JSON ARRAY,
                     response = model.generate_content(batch_prompt)
                     response_text = response.text.strip()
 
-                    # JSON parse
-                    if '```json' in response_text:
-                        response_text = response_text.split('```json')[1].split('```')[0].strip()
-                    elif '```' in response_text:
-                        response_text = response_text.split('```')[1].split('```')[0].strip()
+                    # Güvenli JSON parse
+                    import re
+                    # Markdown code block temizle
+                    response_text = re.sub(r'```json\s*|\s*```', '', response_text)
+                    response_text = response_text.strip()
 
-                    ai_results = json.loads(response_text)
+                    try:
+                        ai_results = json.loads(response_text)
+                    except json.JSONDecodeError:
+                        # Array bulmaya çalış
+                        match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                        if match:
+                            ai_results = json.loads(match.group())
+                        else:
+                            print(f"⚠️ JSON parse edilemedi, fallback kullanılıyor", file=sys.stderr, flush=True)
+                            ai_results = []
 
                     # AI sonuçlarını mekanlarla eşleştir
                     ai_by_name = {r.get('name', '').lower(): r for r in ai_results}
@@ -2784,6 +3281,11 @@ JSON ARRAY olarak döndür. Sadece uygun mekanları dahil et. SADECE JSON ARRAY,
                         # Uygun değilse skip
                         if ai_data and not ai_data.get('isRelevant', True):
                             continue
+
+                        # contextScore'dan ilgili kategorinin skorunu al
+                        context_scores = ai_data.get('contextScore', {})
+                        context_key = CATEGORY_TO_CONTEXT.get(category['name'], 'friends_hangout')
+                        category_match_score = context_scores.get(context_key, 75)
 
                         venue = {
                             'id': f"v{place['idx'] + 1}",
@@ -2797,7 +3299,9 @@ JSON ARRAY olarak döndür. Sadece uygun mekanları dahil et. SADECE JSON ARRAY,
                             'googleRating': place['rating'] if place['rating'] > 0 else 4.0,
                             'googleReviewCount': place.get('review_count', 0),
                             'noiseLevel': ai_data.get('noiseLevel', 50),
-                            'matchScore': ai_data.get('matchScore', 80),
+                            'matchScore': category_match_score,
+                            'contextScore': context_scores,
+                            'bestTimeSlots': ai_data.get('bestTimeSlots', []),
                             'googleMapsUrl': place['google_maps_url'],
                             'googleReviews': place.get('google_reviews', []),
                             'website': place.get('website', ''),
@@ -2809,6 +3313,25 @@ JSON ARRAY olarak döndür. Sadece uygun mekanları dahil et. SADECE JSON ARRAY,
                             'metrics': ai_data.get('metrics', {'noise': 50, 'energy': 50, 'service': 70, 'light': 60, 'privacy': 50}),
                             'isMichelinStarred': is_michelin_restaurant(place['name']) is not None
                         }
+
+                        # contextScore'dan bestFor oluştur (70+ skorlu context'ler)
+                        best_for = []
+                        context_to_label = {
+                            'first_date': 'İlk Buluşma',
+                            'romantic_dinner': 'Romantik Akşam',
+                            'business_meal': 'İş Yemeği',
+                            'friends_hangout': 'Arkadaşlarla',
+                            'family_meal': 'Aile',
+                            'special_occasion': 'Özel Gün',
+                            'fine_dining': 'Fine Dining',
+                            'breakfast_brunch': 'Kahvaltı',
+                            'after_work': 'İş Çıkışı'
+                        }
+                        for ctx, score in context_scores.items():
+                            if score >= 70 and ctx in context_to_label:
+                                best_for.append(context_to_label[ctx])
+                        venue['bestFor'] = best_for[:4]  # Max 4 tane
+
                         venues.append(venue)
 
                     print(f"✅ Gemini batch sonucu: {len(venues)} mekan", file=sys.stderr, flush=True)
