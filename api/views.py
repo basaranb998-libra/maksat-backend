@@ -103,6 +103,12 @@ def is_michelin_restaurant(venue_name):
 from .models import FavoriteVenue, SearchHistory, UserProfile, CachedVenue
 from django.utils import timezone
 from datetime import timedelta
+from .cache_service import (
+    get_cached_venues_for_hybrid_swr,
+    save_venues_to_cache_swr,
+    generate_location_key,
+    get_cache_stats
+)
 from .serializers import (
     UserSerializer, UserRegistrationSerializer,
     FavoriteVenueSerializer, SearchHistorySerializer,
@@ -118,97 +124,138 @@ def health_check(request):
     """Simple health check endpoint to keep the service warm."""
     return Response({'status': 'ok'}, status=status.HTTP_200_OK)
 
+
+# Cache stats endpoint for monitoring
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def cache_stats(request):
+    """
+    Cache statistics endpoint for monitoring SWR cache system.
+    Shows freshness distribution, category counts, and ongoing refreshes.
+    """
+    stats = get_cache_stats()
+    return Response(stats, status=status.HTTP_200_OK)
+
+
+# Cache clear endpoint - practicalInfo/atmosphereSummary eksik venue'ları temizler
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def cache_clear_invalid(request):
+    """
+    Eksik practicalInfo veya atmosphereSummary olan cache kayıtlarını temizler.
+    Ayrıca yorumlarda 'kapandı', 'el değişti' gibi ifadeler olan mekanları da siler.
+    Bu, eski format venue'ların yeniden API'den çekilmesini sağlar.
+    """
+    import sys
+
+    deleted_count = 0
+    deleted_closed = 0
+    deleted_missing = 0
+    venues = CachedVenue.objects.all()
+
+    # Kapanmış mekan tespiti için anahtar kelimeler
+    closed_keywords = [
+        'kalıcı olarak kapan', 'kalici olarak kapan',
+        'artık kapalı', 'artik kapali',
+        'kapandı', 'kapandi',
+        'kapanmış', 'kapanmis',
+        'permanently closed', 'closed permanently',
+        'yeni işletme', 'yeni isletme',
+        'el değiştir', 'el degistir',
+        'isim değişti', 'isim degisti',
+        'yerine açıldı', 'yerine acildi',
+        'burası artık', 'burasi artik'
+    ]
+
+    for venue in venues:
+        venue_data = venue.venue_data
+        should_delete = False
+        delete_reason = ""
+
+        # 1. practicalInfo/atmosphereSummary eksik mi kontrol et
+        has_practical = 'practicalInfo' in venue_data and venue_data['practicalInfo']
+        has_atmosphere = 'atmosphereSummary' in venue_data and venue_data['atmosphereSummary']
+
+        if not has_practical or not has_atmosphere:
+            should_delete = True
+            delete_reason = "missing_fields"
+
+        # 2. Yorumlarda kapanmış mekan belirtisi var mı kontrol et
+        if not should_delete:
+            reviews = venue_data.get('googleReviews', [])
+            for review in reviews[:5]:  # Son 5 yorumu kontrol et
+                review_text = review.get('text', '').lower()
+                review_text_normalized = review_text.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+
+                for keyword in closed_keywords:
+                    keyword_normalized = keyword.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                    if keyword_normalized in review_text_normalized:
+                        should_delete = True
+                        delete_reason = f"closed_venue:{keyword}"
+                        break
+                if should_delete:
+                    break
+
+        if should_delete:
+            print(f"🗑️ CACHE DELETE - {venue.name}: {delete_reason}", file=sys.stderr, flush=True)
+            venue.delete()
+            deleted_count += 1
+            if delete_reason == "missing_fields":
+                deleted_missing += 1
+            else:
+                deleted_closed += 1
+
+    return Response({
+        'deleted': deleted_count,
+        'deleted_missing_fields': deleted_missing,
+        'deleted_closed_venues': deleted_closed,
+        'message': f'{deleted_count} venue cache\'den silindi ({deleted_missing} eksik alan, {deleted_closed} kapanmış mekan)'
+    }, status=status.HTTP_200_OK)
+
 # Initialize APIs - lazy load to avoid errors during startup
 def get_gmaps_client():
     return googlemaps.Client(key=settings.GOOGLE_MAPS_API_KEY) if settings.GOOGLE_MAPS_API_KEY else None
 
 
-# ===== CACHE HELPER FONKSİYONLARI =====
-CACHE_MAX_AGE_DAYS = 30  # Bu kadar günden eski veriler yeniden sorgulanır
+# ===== CACHE HELPER FONKSİYONLARI (SWR - Stale-While-Revalidate) =====
 CACHE_VENUES_LIMIT = 5  # Cache'ten alınacak venue sayısı
 
-def get_cached_venues_for_hybrid(category_name: str, city: str, district: str = None, exclude_ids: set = None, limit: int = 5):
+
+def get_cached_venues_for_hybrid(category_name: str, city: str, district: str = None, exclude_ids: set = None, limit: int = 5, refresh_callback=None):
     """
-    Hybrid sistem için cache'ten venue'ları çeker.
-    Belirtilen limit kadar venue döndürür (varsayılan 5).
-    Ayrıca cache'teki tüm place_id'leri döndürür (API çağrısında exclude için).
+    Hybrid sistem için cache'ten venue'ları çeker (SWR stratejisi ile).
+
+    Freshness Rules:
+    - 0-12 saat: FRESH (direkt cache'ten dön)
+    - 12-24 saat: STALE (cache'ten dön, arka planda refresh başlat)
+    - 24+ saat: EXPIRED (API'ye git, yeni cache oluştur)
+
     Returns: (venues_list, all_cached_place_ids)
     """
-    import sys
+    venues_data, all_cached_ids, freshness = get_cached_venues_for_hybrid_swr(
+        category_name=category_name,
+        city=city,
+        district=district,
+        exclude_ids=exclude_ids,
+        limit=limit,
+        refresh_callback=refresh_callback
+    )
 
-    try:
-        # Cache sorgusu - category + city + district
-        cache_query = CachedVenue.objects.filter(
-            category=category_name,
-            city__iexact=city
-        )
-
-        if district:
-            cache_query = cache_query.filter(district__iexact=district)
-
-        # 30 günden eski olmayan kayıtlar
-        cache_cutoff = timezone.now() - timedelta(days=CACHE_MAX_AGE_DAYS)
-        cache_query = cache_query.filter(last_api_call__gte=cache_cutoff)
-
-        cached_venues = list(cache_query)
-
-        # Tüm cache'teki place_id'leri al (API'de exclude için)
-        all_cached_ids = {v.place_id for v in cached_venues}
-
-        # Exclude IDs'ları filtrele
-        if exclude_ids:
-            cached_venues = [v for v in cached_venues if v.place_id not in exclude_ids]
-
-        print(f"📦 CACHE - {category_name}/{city}/{district or 'ALL'}: {len(cached_venues)} venue (toplam cache: {len(all_cached_ids)})", file=sys.stderr, flush=True)
-
-        # Limit kadar venue döndür
-        venues_data = [v.venue_data for v in cached_venues[:limit]]
-
-        return venues_data, all_cached_ids
-    except Exception as e:
-        print(f"⚠️ CACHE ERROR - {category_name}/{city}: {e}", file=sys.stderr, flush=True)
-        return [], set()  # Cache error - boş döndür
+    # Backward compatibility - return tuple without freshness
+    return venues_data, all_cached_ids
 
 
 def save_venues_to_cache(venues: list, category_name: str, city: str, district: str = None, neighborhood: str = None):
     """
-    Venue'ları cache'e kaydeder.
-    Her venue için place_id'ye göre update_or_create yapar.
-    Tablo yoksa veya hata olursa sessizce başarısız olur.
+    Venue'ları cache'e kaydeder (SWR metadata ile).
     """
-    import sys
-
-    try:
-        saved_count = 0
-        for venue in venues:
-            place_id = venue.get('id', '')
-
-            # place_id yoksa atla
-            if not place_id:
-                continue
-
-            try:
-                CachedVenue.objects.update_or_create(
-                    place_id=place_id,
-                    defaults={
-                        'name': venue.get('name', ''),
-                        'category': category_name,
-                        'city': city,
-                        'district': district or '',
-                        'neighborhood': neighborhood or '',
-                        'venue_data': venue,
-                        'google_rating': venue.get('googleRating'),
-                        'google_review_count': venue.get('googleReviewCount'),
-                        'last_api_call': timezone.now()
-                    }
-                )
-                saved_count += 1
-            except Exception as e:
-                print(f"⚠️ Cache save error for {place_id}: {e}", file=sys.stderr, flush=True)
-
-        print(f"💾 CACHE SAVE - {saved_count}/{len(venues)} venue kaydedildi ({category_name}/{city}/{district or 'ALL'})", file=sys.stderr, flush=True)
-    except Exception as e:
-        print(f"⚠️ CACHE SAVE FAILED - {category_name}/{city}: {e}", file=sys.stderr, flush=True)
+    save_venues_to_cache_swr(
+        venues=venues,
+        category_name=category_name,
+        city=city,
+        district=district,
+        neighborhood=neighborhood
+    )
 
 def search_google_places(query, max_results=1):
     """
@@ -3782,6 +3829,40 @@ def generate_venues(request):
                     if latest_review_time and latest_review_time < seven_months_ago:
                         print(f"❌ ESKİ YORUM REJECT - {place_name}: son yorum {latest_review_time.strftime('%Y-%m-%d')} (7 aydan eski)", file=sys.stderr, flush=True)
                         continue
+
+            # ===== KAPANMIŞ MEKAN KONTROLÜ (YORUM İÇERİĞİ) =====
+            # Google "OPERATIONAL" dese bile yorumlarda "kapandı" yazıyorsa filtrele
+            raw_reviews = place.get('reviews', [])
+            if raw_reviews:
+                closed_keywords = [
+                    'kalıcı olarak kapan', 'kalici olarak kapan',
+                    'artık kapalı', 'artik kapali',
+                    'kapandı', 'kapandi',
+                    'kapanmış', 'kapanmis',
+                    'permanently closed', 'closed permanently',
+                    'yeni işletme', 'yeni isletme',
+                    'el değiştir', 'el degistir',
+                    'isim değişti', 'isim degisti',
+                    'yerine açıldı', 'yerine acildi',
+                    'burası artık', 'burasi artik'
+                ]
+
+                is_closed_by_reviews = False
+                for review in raw_reviews[:5]:  # Son 5 yorumu kontrol et
+                    review_text = review.get('text', {}).get('text', '').lower()
+                    review_text_normalized = review_text.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+
+                    for keyword in closed_keywords:
+                        keyword_normalized = keyword.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                        if keyword_normalized in review_text_normalized:
+                            is_closed_by_reviews = True
+                            print(f"❌ KAPANMIŞ MEKAN (YORUM) REJECT - {place_name}: yorumda '{keyword}' bulundu", file=sys.stderr, flush=True)
+                            break
+                    if is_closed_by_reviews:
+                        break
+
+                if is_closed_by_reviews:
+                    continue
 
             # ===== TEKEL/MARKET FİLTRESİ =====
             # Tüm kategorilerde tekel, market, bakkal gibi yerleri hariç tut

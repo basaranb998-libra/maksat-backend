@@ -11,6 +11,10 @@ urlpatterns = [
     # Health check (for Render cold start)
     path('health/', views.health_check, name='health-check'),
 
+    # Cache monitoring
+    path('cache/stats/', views.cache_stats, name='cache-stats'),
+    path('cache/clear-invalid/', views.cache_clear_invalid, name='cache-clear-invalid'),
+
     # Authentication
     path('auth/register/', views.register, name='register'),
     path('auth/login/', views.login, name='login'),

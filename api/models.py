@@ -51,13 +51,16 @@ class UserProfile(models.Model):
 
 
 class CachedVenue(models.Model):
-    """API çağrılarını azaltmak için cache'lenmiş mekan verileri"""
+    """API çağrılarını azaltmak için cache'lenmiş mekan verileri - Stale-While-Revalidate"""
     place_id = models.CharField(max_length=255, unique=True, db_index=True)
     name = models.CharField(max_length=255)
     category = models.CharField(max_length=100, db_index=True)  # Kategori adı (Meyhane, Kafe, vb.)
     city = models.CharField(max_length=100, db_index=True)  # İl
     district = models.CharField(max_length=100, blank=True, db_index=True)  # İlçe
     neighborhood = models.CharField(max_length=100, blank=True)  # Mahalle/Semt
+
+    # Location key for cache grouping (category:city:district hash)
+    location_key = models.CharField(max_length=64, db_index=True, blank=True, default='')
 
     # Tüm venue verisi JSON olarak
     venue_data = models.JSONField()  # Gemini'den gelen tüm venue objesi
@@ -69,7 +72,10 @@ class CachedVenue(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    # Veri güncelliği için - 30 günden eski veriler yeniden sorgulanabilir
+    # SWR için son erişim zamanı (null=True ile mevcut kayıtlar için)
+    last_accessed = models.DateTimeField(null=True, blank=True)
+
+    # Veri güncelliği için - API'den çekilme zamanı
     last_api_call = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -79,6 +85,8 @@ class CachedVenue(models.Model):
         indexes = [
             models.Index(fields=['category', 'city', 'district']),
             models.Index(fields=['category', 'city']),
+            models.Index(fields=['location_key']),
+            models.Index(fields=['location_key', 'last_api_call']),
         ]
 
     def __str__(self):
