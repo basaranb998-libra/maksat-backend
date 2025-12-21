@@ -144,6 +144,7 @@ def cache_clear_invalid(request):
     """
     Eksik practicalInfo veya atmosphereSummary olan cache kayıtlarını temizler.
     Ayrıca yorumlarda 'kapandı', 'el değişti' gibi ifadeler olan mekanları da siler.
+    Romantik kategorilerdeki zincir mekanları da temizler.
     Bu, eski format venue'ların yeniden API'den çekilmesini sağlar.
     """
     import sys
@@ -151,6 +152,7 @@ def cache_clear_invalid(request):
     deleted_count = 0
     deleted_closed = 0
     deleted_missing = 0
+    deleted_chains = 0
     venues = CachedVenue.objects.all()
 
     # Kapanmış mekan tespiti için anahtar kelimeler
@@ -166,6 +168,24 @@ def cache_clear_invalid(request):
         'yerine açıldı', 'yerine acildi',
         'burası artık', 'burasi artik'
     ]
+
+    # Romantik kategorilerde istenmeyecek zincir mekanlar
+    chain_store_blacklist = [
+        'starbucks', 'gloria jeans', 'caribou', 'coffee bean', 'espresso lab',
+        'mcdonalds', 'burger king', 'wendys', 'kfc', 'popeyes', 'dominos', 'pizza hut',
+        'little caesars', 'papa johns', 'sbarro', 'arbys', 'taco bell', 'subway',
+        'mado', 'the house cafe', 'house cafe', 'big chefs', 'bigchefs', 'midpoint',
+        'baylan', 'divan', 'kahve dunyasi', 'kahve dünyası', 'nero', 'costa coffee',
+        'simit sarayi', 'simit sarayı', 'tavuk dunyasi', 'tavuk dünyası', 'usta donerci',
+        'komagene', 'baydoner', 'bay döner', 'burger lab', 'zuma', 'etiler', 'nusr-et',
+        'dunkin', 'krispy kreme', 'cinnabon', 'hafiz mustafa', 'hafız mustafa',
+        'incir', 'saray muhallebicisi', 'pelit', 'faruk gulluoglu', 'faruk güllüoğlu',
+        'wok to walk', 'wagamama', 'nandos', 'tgi fridays', 'chilis', 'applebees',
+        'hard rock cafe', 'planet hollywood', 'rainforest cafe', 'cheesecake factory',
+        'petra roasting', "walter's coffee"
+    ]
+
+    romantic_categories = ['İlk Buluşma', 'Özel Gün', 'Fine Dining', 'Romantik Akşam']
 
     for venue in venues:
         venue_data = venue.venue_data
@@ -196,20 +216,33 @@ def cache_clear_invalid(request):
                 if should_delete:
                     break
 
+        # 3. Romantik kategorilerde zincir mekan mı kontrol et
+        if not should_delete and venue.category in romantic_categories:
+            venue_name_lower = venue.name.lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+            for chain in chain_store_blacklist:
+                chain_normalized = chain.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                if chain_normalized in venue_name_lower:
+                    should_delete = True
+                    delete_reason = f"chain_store:{chain}"
+                    break
+
         if should_delete:
             print(f"🗑️ CACHE DELETE - {venue.name}: {delete_reason}", file=sys.stderr, flush=True)
             venue.delete()
             deleted_count += 1
             if delete_reason == "missing_fields":
                 deleted_missing += 1
-            else:
+            elif delete_reason.startswith("closed_venue"):
                 deleted_closed += 1
+            elif delete_reason.startswith("chain_store"):
+                deleted_chains += 1
 
     return Response({
         'deleted': deleted_count,
         'deleted_missing_fields': deleted_missing,
         'deleted_closed_venues': deleted_closed,
-        'message': f'{deleted_count} venue cache\'den silindi ({deleted_missing} eksik alan, {deleted_closed} kapanmış mekan)'
+        'deleted_chain_stores': deleted_chains,
+        'message': f'{deleted_count} venue cache\'den silindi ({deleted_missing} eksik alan, {deleted_closed} kapanmış mekan, {deleted_chains} zincir mağaza)'
     }, status=status.HTTP_200_OK)
 
 # Initialize APIs - lazy load to avoid errors during startup
@@ -2206,14 +2239,14 @@ def generate_mock_venues(category, location, filters):
     districts = location.get('districts', [])
     district = districts[0] if districts else city
 
-    # Kategori bazlı örnek mekanlar
+    # Kategori bazlı örnek mekanlar (butik/özel mekanlar, zincir değil)
     mock_places = {
         'İlk Buluşma': [
-            {'name': 'Kahve Dünyası', 'type': 'Kafe', 'vibes': ['#Sakin', '#Rahat', '#Sıcak']},
-            {'name': 'Starbucks', 'type': 'Kafe', 'vibes': ['#Modern', '#WiFi', '#Sessiz']},
-            {'name': 'Mado', 'type': 'Cafe & Restaurant', 'vibes': ['#Aile', '#Geleneksel', '#Tatlı']},
-            {'name': 'The House Cafe', 'type': 'Kafe', 'vibes': ['#Şık', '#Popüler', '#Instagram']},
-            {'name': 'Petra Roasting Co.', 'type': 'Kafe', 'vibes': ['#Specialty', '#Sessiz', '#Kaliteli']},
+            {'name': 'Mandabatmaz', 'type': 'Türk Kahvecisi', 'vibes': ['#Otantik', '#Tarihi', '#Romantik']},
+            {'name': 'Fazıl Bey', 'type': 'Kahveci', 'vibes': ['#Klasik', '#Sakin', '#Nostaljik']},
+            {'name': 'Kronotrop Coffee', 'type': 'Specialty Kafe', 'vibes': ['#Modern', '#Kaliteli', '#Şık']},
+            {'name': 'Dem Karaköy', 'type': 'Butik Kafe', 'vibes': ['#Sanat', '#Sohbet', '#Samimi']},
+            {'name': 'Ops Karaköy', 'type': 'Butik Kafe', 'vibes': ['#Özel', '#Romantik', '#İntim']},
         ],
         'Tatil': [
             {'name': 'Lara Beach Hotel', 'type': 'Otel', 'vibes': ['#Plaj', '#HerŞeyDahil', '#Lüks']},
@@ -2221,7 +2254,7 @@ def generate_mock_venues(category, location, filters):
             {'name': 'Maxx Royal', 'type': 'Otel', 'vibes': ['#VIP', '#Plaj', '#Gourmet']},
         ],
         'İş Toplantısı': [
-            {'name': 'Starbucks Reserve', 'type': 'Kafe', 'vibes': ['#Sessiz', '#WiFi', '#Professional']},
+            {'name': 'Kronotrop Coffee Bar', 'type': 'Specialty Kafe', 'vibes': ['#Sessiz', '#WiFi', '#Profesyonel']},
             {'name': 'Hilton Meeting Room', 'type': 'Toplantı Salonu', 'vibes': ['#İş', '#Teknoloji', '#Profesyonel']},
         ],
     }
@@ -3986,6 +4019,38 @@ def generate_venues(request):
 
                 if is_excluded:
                     print(f"❌ BALIKÇI REJECT - {place_name}: balık pişirici/market türü", file=sys.stderr, flush=True)
+                    continue
+
+            # ===== ZİNCİR MAĞAZA FİLTRESİ (ROMANTİK KATEGORİLER) =====
+            # İlk Buluşma, Özel Gün, Fine Dining gibi romantik kategorilerde zincir mekanları filtrele
+            romantic_categories = ['İlk Buluşma', 'Özel Gün', 'Fine Dining', 'Romantik Akşam']
+
+            if category_name in romantic_categories:
+                chain_store_blacklist = [
+                    # Kahve zincirleri
+                    'starbucks', 'gloria jeans', 'caribou', 'coffee bean', 'espresso lab',
+                    # Fast food
+                    'mcdonalds', 'burger king', 'wendys', 'kfc', 'popeyes', 'dominos', 'pizza hut',
+                    'little caesars', 'papa johns', 'sbarro', 'arbys', 'taco bell', 'subway',
+                    # Türk zincirleri - kafe
+                    'mado', 'the house cafe', 'house cafe', 'big chefs', 'bigchefs', 'midpoint',
+                    'baylan', 'divan', 'kahve dunyasi', 'kahve dünyası', 'nero', 'costa coffee',
+                    # Türk zincirleri - fast food/restoran
+                    'simit sarayi', 'simit sarayı', 'tavuk dunyasi', 'tavuk dünyası', 'usta donerci',
+                    'komagene', 'baydoner', 'bay döner', 'burger lab', 'zuma', 'etiler', 'nusr-et',
+                    # Pastane/tatlıcı zincirleri
+                    'dunkin', 'krispy kreme', 'cinnabon', 'hafiz mustafa', 'hafız mustafa',
+                    'incir', 'saray muhallebicisi', 'pelit', 'faruk gulluoglu', 'faruk güllüoğlu',
+                    # Diğer zincirler
+                    'wok to walk', 'wagamama', 'nandos', 'tgi fridays', 'chilis', 'applebees',
+                    'hard rock cafe', 'planet hollywood', 'rainforest cafe', 'cheesecake factory',
+                    'petra roasting', 'walter\'s coffee'
+                ]
+
+                is_chain = any(chain in place_name_lower for chain in chain_store_blacklist)
+
+                if is_chain:
+                    print(f"❌ ZİNCİR MEKAN REJECT - {place_name}: romantik kategori için uygunsuz", file=sys.stderr, flush=True)
                     continue
 
             # Google Reviews'ı parse et (max 10, en yeniden eskiye sıralı)
