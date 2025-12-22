@@ -156,6 +156,7 @@ def cache_clear_invalid(request):
     venues = CachedVenue.objects.all()
 
     # Kapanmış mekan tespiti için anahtar kelimeler
+    # NOT: "el değiştir" kaldırıldı - el değiştirmek kapanmak anlamına gelmiyor
     closed_keywords = [
         'kalıcı olarak kapan', 'kalici olarak kapan',
         'artık kapalı', 'artik kapali',
@@ -163,7 +164,6 @@ def cache_clear_invalid(request):
         'kapanmış', 'kapanmis',
         'permanently closed', 'closed permanently',
         'yeni işletme', 'yeni isletme',
-        'el değiştir', 'el degistir',
         'isim değişti', 'isim degisti',
         'yerine açıldı', 'yerine acildi',
         'burası artık', 'burasi artik'
@@ -3681,13 +3681,12 @@ def generate_venues(request):
         use_mock_data = not gmaps
         places_result = {'results': []}
 
-        # Nearby Search için uygun kategoriler
-        nearby_search_categories = ['İş Çıkışı Bira & Kokteyl', 'Meyhane']
+        # Nearby Search için uygun kategoriler (Meyhane hariç - text search daha iyi sonuç veriyor)
+        nearby_search_categories = ['İş Çıkışı Bira & Kokteyl']
 
         # Kategori bazlı included types (Google Places API için)
         category_included_types = {
             'İş Çıkışı Bira & Kokteyl': ['bar', 'pub', 'night_club'],
-            'Meyhane': ['bar', 'restaurant', 'turkish_restaurant'],
         }
 
         if gmaps:
@@ -3941,6 +3940,7 @@ def generate_venues(request):
 
             # ===== KAPANMIŞ MEKAN KONTROLÜ (YORUM İÇERİĞİ) =====
             # Google "OPERATIONAL" dese bile yorumlarda "kapandı" yazıyorsa filtrele
+            # NOT: "el değiştir" kaldırıldı - el değiştirmek kapanmak anlamına gelmiyor
             raw_reviews = place.get('reviews', [])
             if raw_reviews:
                 closed_keywords = [
@@ -3950,7 +3950,6 @@ def generate_venues(request):
                     'kapanmış', 'kapanmis',
                     'permanently closed', 'closed permanently',
                     'yeni işletme', 'yeni isletme',
-                    'el değiştir', 'el degistir',
                     'isim değişti', 'isim degisti',
                     'yerine açıldı', 'yerine acildi',
                     'burası artık', 'burasi artik'
@@ -4070,20 +4069,29 @@ def generate_venues(request):
             # Meyhane kategorisinde place_types tabanlı filtreleme - Gemini AI karar verecek
             if category['name'] == 'Meyhane':
                 # İsminde meyhane geçenler direkt kabul
-                meyhane_keywords = ['meyhane', 'meyhanesi']
+                meyhane_keywords = ['meyhane', 'meyhanesi', 'rakı', 'fasıl']
                 is_meyhane_by_name = any(keyword in place_name_lower for keyword in meyhane_keywords)
 
                 # Place types ile meyhane olabilecek tipler: bar, restaurant, turkish_restaurant
                 meyhane_compatible_types = ['bar', 'restaurant', 'turkish_restaurant', 'meal_takeaway', 'meal_delivery']
                 is_meyhane_by_type = any(ptype in place_types for ptype in meyhane_compatible_types)
 
-                # İsminde veya tipinde meyhane uyumlu değilse reddet
-                if not is_meyhane_by_name and not is_meyhane_by_type:
+                # Yorumlarda rakı geçenler de kabul edilsin
+                is_meyhane_by_reviews = False
+                meyhane_review_keywords = ['rakı', 'raki', 'meyhane', 'meze', 'fasıl', 'fasil']
+                for review in raw_reviews[:5]:
+                    review_text = review.get('text', {}).get('text', '').lower()
+                    if any(keyword in review_text for keyword in meyhane_review_keywords):
+                        is_meyhane_by_reviews = True
+                        break
+
+                # İsminde, tipinde veya yorumlarında meyhane uyumlu değilse reddet
+                if not is_meyhane_by_name and not is_meyhane_by_type and not is_meyhane_by_reviews:
                     print(f"❌ MEYHANE REJECT - {place_name}: uygun tip yok (types: {place_types})", file=sys.stderr, flush=True)
                     continue
 
                 # Gemini AI kararı için devam et - isRelevant kontrolü yapılacak
-                print(f"✅ MEYHANE PASS - {place_name}: name_match={is_meyhane_by_name}, type_match={is_meyhane_by_type}", file=sys.stderr, flush=True)
+                print(f"✅ MEYHANE PASS - {place_name}: name_match={is_meyhane_by_name}, type_match={is_meyhane_by_type}, review_match={is_meyhane_by_reviews}", file=sys.stderr, flush=True)
 
             # ===== BALIKÇI KATEGORİSİ FİLTRESİ =====
             # Balıkçı kategorisinde balık pişiricilerini hariç tut
