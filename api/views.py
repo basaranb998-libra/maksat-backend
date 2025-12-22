@@ -2787,8 +2787,18 @@ def generate_party_venues(location, filters, exclude_ids):
         'dans kursu', 'dans okulu', 'dans toplulugu', 'dans atolyesi',
         'dance school', 'dance studio', 'dance class', 'dance academy',
         'salsa kursu', 'tango kursu', 'bale', 'ballet', 'zumba',
-        'latin dans', 'halk danslari', 'folklor'
+        'latin dans', 'halk danslari', 'folklor', 'halk dansi', 'tango egitimi',
+        'dans egitimi', 'dans dersi', 'swing', 'bachata', 'kizomba',
+        'ksk-d', 'kskd'  # Karşıyaka Spor Kulübü Dans
     ]
+
+    # Sahil/Plaj/Park filtresi - açık alan mekanlar parti mekanı değil
+    outdoor_location_keywords = [
+        'sahil', 'sahili', 'plaj', 'plaji', 'beach', 'koy', 'koyu',
+        'park', 'parki', 'bahce', 'bahcesi', 'garden',
+        'kordon', 'iskele', 'marina', 'liman'
+    ]
+    outdoor_location_types = ['park', 'natural_feature', 'tourist_attraction', 'beach']
 
     # Müzik okulu/merkezi filtresi - parti mekanı değil
     music_school_keywords = [
@@ -2910,6 +2920,16 @@ def generate_party_venues(location, filters, exclude_ids):
                     is_music_school = any(keyword in place_name_lower for keyword in music_school_keywords)
                     if is_music_school:
                         print(f"❌ MÜZİK OKULU REJECT - {place_name}", file=sys.stderr, flush=True)
+                        continue
+
+                    # Sahil/Plaj/Park filtresi - açık alan mekanlar parti mekanı değil (beach club hariç)
+                    is_outdoor_by_name = any(keyword in place_name_lower for keyword in outdoor_location_keywords)
+                    is_outdoor_by_type = any(t in place_types_str for t in outdoor_location_types)
+                    has_club_keyword = 'club' in place_name_lower or 'kulup' in place_name_lower or 'kulüp' in place_name_lower
+
+                    # Beach club, plaj club gibi mekanlar OK - sadece "sahil", "plaj" gibi açık alanlar reject
+                    if (is_outdoor_by_name or is_outdoor_by_type) and not has_club_keyword and 'bar' not in place_types_str and 'night_club' not in place_types_str:
+                        print(f"❌ SAHİL/PARK REJECT - {place_name}: açık alan, parti mekanı değil", file=sys.stderr, flush=True)
                         continue
 
                     # Parti/eğlence mekanı değilse filtrele (sade restoran, kafe, birahaneler)
