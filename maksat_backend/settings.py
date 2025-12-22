@@ -43,6 +43,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'api.middleware.SecurityHeadersMiddleware',
 ]
 
 ROOT_URLCONF = 'maksat_backend.urls'
@@ -155,3 +156,26 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 
 # Google OAuth Settings
 GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')
+
+# Security Headers (Production only)
+if not DEBUG:
+    # HTTPS settings
+    SECURE_SSL_REDIRECT = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+    # HSTS settings (already passing, but enhance for preload)
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+    # Content Security Policy - X-Frame-Options
+    X_FRAME_OPTIONS = 'DENY'
+
+    # X-Content-Type-Options
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+
+    # Referrer Policy
+    SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+
+    # Cross-Origin settings
+    SECURE_CROSS_ORIGIN_OPENER_POLICY = 'same-origin'
