@@ -2774,8 +2774,9 @@ def generate_party_venues(location, filters, exclude_ids):
     added_ids = set()
 
     # Pavyon/konsomatris filtresi için keywords
+    # NOT: "gazino" kaldırıldı - Türk kültüründe geleneksel eğlence mekanları (canlı müzik, fasıl)
     pavyon_keywords = [
-        'pavyon', 'konsomatris', 'gazino', 'casino', 'kabare', 'cabaret',
+        'pavyon', 'konsomatris', 'casino', 'kabare', 'cabaret',
         'gece alemi', 'eglence merkezi', 'dans bar', 'show bar',
         'strip', 'striptiz', 'hostess', 'escort', 'masaj salonu',
         'gentlemen', 'club 18', 'club18', 'adult', 'yetiskin'
@@ -4060,8 +4061,9 @@ def generate_venues(request):
             # ===== PAVYON/KONSOMATRIS FİLTRESİ =====
             # Eğlence & Parti kategorisi için uygunsuz mekanları filtrele
             if category['name'] == 'Eğlence & Parti':
+                # NOT: "gazino" kaldırıldı - Türk kültüründe geleneksel eğlence mekanları (canlı müzik, fasıl)
                 pavyon_keywords = [
-                    'pavyon', 'konsomatris', 'gazino', 'casino', 'kabare', 'cabaret',
+                    'pavyon', 'konsomatris', 'casino', 'kabare', 'cabaret',
                     'gece alemi', 'eglence merkezi', 'dans bar', 'show bar',
                     'strip', 'striptiz', 'hostess', 'escort', 'masaj salonu',
                     'gentlemen', 'club 18', 'club18', 'adult', 'yetiskin'
