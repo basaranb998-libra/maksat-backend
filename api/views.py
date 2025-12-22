@@ -3681,33 +3681,109 @@ def generate_venues(request):
         use_mock_data = not gmaps
         places_result = {'results': []}
 
+        # Nearby Search için uygun kategoriler
+        nearby_search_categories = ['İş Çıkışı Bira & Kokteyl', 'Meyhane']
+
+        # Kategori bazlı included types (Google Places API için)
+        category_included_types = {
+            'İş Çıkışı Bira & Kokteyl': ['bar', 'pub', 'night_club'],
+            'Meyhane': ['bar', 'restaurant', 'turkish_restaurant'],
+        }
+
         if gmaps:
             try:
-                # Yeni Places API (Text Search) kullanarak ara
                 import requests
-                url = "https://places.googleapis.com/v1/places:searchText"
                 headers = {
                     "Content-Type": "application/json",
                     "X-Goog-Api-Key": settings.GOOGLE_MAPS_API_KEY,
                     "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours,places.businessStatus"
                 }
 
-                payload = {
-                    "textQuery": f"{search_query} in {search_location}, Turkey",
-                    "languageCode": "tr",
-                    "maxResultCount": 20  # Maximum sonuç
-                }
+                # İş Çıkışı Bira & Kokteyl ve Meyhane için Nearby Search kullan
+                if category['name'] in nearby_search_categories:
+                    # Önce lokasyonun koordinatlarını al (geocode)
+                    geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+                    geocode_params = {
+                        "address": f"{search_location}, Turkey",
+                        "key": settings.GOOGLE_MAPS_API_KEY
+                    }
+                    geocode_response = requests.get(geocode_url, params=geocode_params)
 
-                print(f"DEBUG - Google Places API Query: {payload['textQuery']}", file=sys.stderr, flush=True)
+                    if geocode_response.status_code == 200:
+                        geocode_data = geocode_response.json()
+                        if geocode_data.get('results'):
+                            location_coords = geocode_data['results'][0]['geometry']['location']
+                            lat, lng = location_coords['lat'], location_coords['lng']
 
-                response = requests.post(url, json=payload, headers=headers)
+                            print(f"🗺️ Nearby Search - {category['name']}: {search_location} -> ({lat}, {lng})", file=sys.stderr, flush=True)
 
-                if response.status_code == 200:
-                    places_data = response.json()
-                    places_result = {'results': places_data.get('places', [])}
+                            # Nearby Search API çağrısı
+                            nearby_url = "https://places.googleapis.com/v1/places:searchNearby"
+                            included_types = category_included_types.get(category['name'], ['bar', 'restaurant'])
+
+                            nearby_payload = {
+                                "includedTypes": included_types,
+                                "maxResultCount": 20,
+                                "locationRestriction": {
+                                    "circle": {
+                                        "center": {
+                                            "latitude": lat,
+                                            "longitude": lng
+                                        },
+                                        "radius": 2000.0  # 2km yarıçap
+                                    }
+                                },
+                                "languageCode": "tr"
+                            }
+
+                            print(f"🔍 Nearby Search types: {included_types}", file=sys.stderr, flush=True)
+
+                            response = requests.post(nearby_url, json=nearby_payload, headers=headers)
+
+                            if response.status_code == 200:
+                                places_data = response.json()
+                                places_result = {'results': places_data.get('places', [])}
+                                print(f"✅ Nearby Search sonuç: {len(places_result['results'])} mekan", file=sys.stderr, flush=True)
+                            else:
+                                print(f"Nearby Search API hatası: {response.status_code} - {response.text}", file=sys.stderr, flush=True)
+                                # Fallback: Text Search kullan
+                                url = "https://places.googleapis.com/v1/places:searchText"
+                                payload = {
+                                    "textQuery": f"{search_query} in {search_location}, Turkey",
+                                    "languageCode": "tr",
+                                    "maxResultCount": 20
+                                }
+                                response = requests.post(url, json=payload, headers=headers)
+                                if response.status_code == 200:
+                                    places_data = response.json()
+                                    places_result = {'results': places_data.get('places', [])}
+                                else:
+                                    use_mock_data = True
+                        else:
+                            print(f"⚠️ Geocode sonuç bulunamadı: {search_location}", file=sys.stderr, flush=True)
+                            use_mock_data = True
+                    else:
+                        print(f"Geocode hatası: {geocode_response.status_code}", file=sys.stderr, flush=True)
+                        use_mock_data = True
                 else:
-                    print(f"Places API hatası: {response.status_code} - {response.text}", file=sys.stderr, flush=True)
-                    use_mock_data = True
+                    # Diğer kategoriler için Text Search kullan
+                    url = "https://places.googleapis.com/v1/places:searchText"
+                    payload = {
+                        "textQuery": f"{search_query} in {search_location}, Turkey",
+                        "languageCode": "tr",
+                        "maxResultCount": 20  # Maximum sonuç
+                    }
+
+                    print(f"DEBUG - Google Places API Query: {payload['textQuery']}", file=sys.stderr, flush=True)
+
+                    response = requests.post(url, json=payload, headers=headers)
+
+                    if response.status_code == 200:
+                        places_data = response.json()
+                        places_result = {'results': places_data.get('places', [])}
+                    else:
+                        print(f"Places API hatası: {response.status_code} - {response.text}", file=sys.stderr, flush=True)
+                        use_mock_data = True
 
             except Exception as e:
                 print(f"Google Places API hatası: {e}")
@@ -3991,14 +4067,23 @@ def generate_venues(request):
                     continue
 
             # ===== MEYHANE KATEGORİSİ FİLTRESİ =====
-            # Meyhane kategorisinde SADECE isminde "meyhane" geçen mekanları kabul et
+            # Meyhane kategorisinde place_types tabanlı filtreleme - Gemini AI karar verecek
             if category['name'] == 'Meyhane':
+                # İsminde meyhane geçenler direkt kabul
                 meyhane_keywords = ['meyhane', 'meyhanesi']
-                is_meyhane = any(keyword in place_name_lower for keyword in meyhane_keywords)
+                is_meyhane_by_name = any(keyword in place_name_lower for keyword in meyhane_keywords)
 
-                if not is_meyhane:
-                    print(f"❌ MEYHANE REJECT - {place_name}: isminde 'meyhane' yok", file=sys.stderr, flush=True)
+                # Place types ile meyhane olabilecek tipler: bar, restaurant, turkish_restaurant
+                meyhane_compatible_types = ['bar', 'restaurant', 'turkish_restaurant', 'meal_takeaway', 'meal_delivery']
+                is_meyhane_by_type = any(ptype in place_types for ptype in meyhane_compatible_types)
+
+                # İsminde veya tipinde meyhane uyumlu değilse reddet
+                if not is_meyhane_by_name and not is_meyhane_by_type:
+                    print(f"❌ MEYHANE REJECT - {place_name}: uygun tip yok (types: {place_types})", file=sys.stderr, flush=True)
                     continue
+
+                # Gemini AI kararı için devam et - isRelevant kontrolü yapılacak
+                print(f"✅ MEYHANE PASS - {place_name}: name_match={is_meyhane_by_name}, type_match={is_meyhane_by_type}", file=sys.stderr, flush=True)
 
             # ===== BALIKÇI KATEGORİSİ FİLTRESİ =====
             # Balıkçı kategorisinde balık pişiricilerini hariç tut
@@ -4165,10 +4250,12 @@ def generate_venues(request):
                 )
             places_list = "\n".join(places_list_items)
 
+            # Kategori özel talimatları
+            category_instruction = ""
+
             # Balıkçı kategorisi için özel talimat
-            balikci_instruction = ""
             if category['name'] == 'Balıkçı' and 'ALKOL: Alcoholic' in preferences_text:
-                balikci_instruction = """
+                category_instruction = """
 ÖNEMLİ UYARI - BALIKÇI KATEGORİSİ ALKOL FİLTRESİ:
 Kullanıcı ALKOLLÜ balık restoranı istiyor. Aşağıdaki mekanları DİKKATLİCE değerlendir:
 - Sadece gerçekten alkol servisi yapan, lisanslı balık restoranlarını dahil et
@@ -4176,10 +4263,22 @@ Kullanıcı ALKOLLÜ balık restoranı istiyor. Aşağıdaki mekanları DİKKATL
 - Rakı/şarap ile balık yenebilecek kaliteli restoranları tercih et
 - "Vedat'ın Balık Evi", "Çarşı Balık", "Girne Balık Evi" gibi sade balık lokantaları genellikle ALKOLSÜZ'dür, dikkat et!
 """
+            # Meyhane kategorisi için özel talimat - place_types tabanlı filtreleme sonrası AI değerlendirmesi
+            elif category['name'] == 'Meyhane':
+                category_instruction = """
+ÖNEMLİ UYARI - MEYHANE KATEGORİSİ DEĞERLENDİRMESİ:
+Bu kategori için meyhane karakteri taşıyan mekanları değerlendir. DİKKATLİCE incele:
+- İsminde "meyhane" geçmese bile meyhane karakteri taşıyan barlar ve restoranlar (rakı/meze servisi, canlı fasıl, geleneksel atmosfer) KABUL ET (isRelevant: true)
+- Yorumlarda "rakı", "meze", "fasıl", "canlı müzik", "saz" gibi ifadeler meyhane karakterini gösterir
+- Geleneksel Türk içki kültürünü yansıtan mekanları KABUL ET
+- Sadece bar/pub konseptinde olup meyhane atmosferi olmayan yerleri REDDET (isRelevant: false)
+- Fast food, cafe, tatlıcı gibi alakasız mekanları REDDET (isRelevant: false)
+- "Leke", "Balıkçı", "Fasıl", "Meyhane" gibi kelimeler genellikle meyhane karakteri taşır
+"""
 
             batch_prompt = f"""Kategori: {category['name']}
 Kullanıcı Tercihleri: {preferences_text}
-{balikci_instruction}
+{category_instruction}
 
 Mekanlar ve Yorumları:
 {places_list}
