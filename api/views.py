@@ -2809,6 +2809,17 @@ def generate_party_venues(location, filters, exclude_ids):
         'ses egitimi', 'vokal', 'koro', 'choir'
     ]
 
+    # Parti malzemeleri dükkanı filtresi - eğlence mekanı değil, mağaza
+    party_store_keywords = [
+        'parti malzemeleri', 'parti malzemesi', 'party malzemeleri',
+        'dogum gunu malzemeleri', 'doğum günü malzemeleri', 'dogum gunu',
+        'parti evi', 'party evi', 'party store', 'party shop',
+        'balon', 'baloncu', 'balloon', 'parti susleme', 'parti süsleme',
+        'kostum', 'kostüm', 'costume', 'maske', 'parti aksesuar',
+        'parti dekor', 'dekorasyon malzemesi', 'kutlama malzemeleri'
+    ]
+    party_store_types = ['store', 'shopping_mall', 'home_goods_store', 'furniture_store']
+
     try:
         for query_term, venue_type in party_queries:
             try:
@@ -2920,6 +2931,14 @@ def generate_party_venues(location, filters, exclude_ids):
                     is_music_school = any(keyword in place_name_lower for keyword in music_school_keywords)
                     if is_music_school:
                         print(f"❌ MÜZİK OKULU REJECT - {place_name}", file=sys.stderr, flush=True)
+                        continue
+
+                    # Parti malzemeleri dükkanı filtresi - eğlence mekanı değil, mağaza
+                    is_party_store_by_name = any(keyword in place_name_lower for keyword in party_store_keywords)
+                    is_party_store_by_type = any(t in place_types_str for t in party_store_types) and not any(t in place_types_str for t in ['bar', 'night_club', 'restaurant'])
+
+                    if is_party_store_by_name or (is_party_store_by_type and 'malzeme' in place_name_lower):
+                        print(f"❌ PARTİ MALZEMELERİ DÜKKANI REJECT - {place_name}: mağaza, eğlence mekanı değil", file=sys.stderr, flush=True)
                         continue
 
                     # Sahil/Plaj/Park filtresi - açık alan mekanlar parti mekanı değil (beach club hariç)
