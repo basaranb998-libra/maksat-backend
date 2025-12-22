@@ -2944,6 +2944,26 @@ def generate_party_venues(location, filters, exclude_ids):
                         print(f"❌ TEKEL REJECT - {place_name}", file=sys.stderr, flush=True)
                         continue
 
+                    # Hizmet firması filtresi (DJ team, organizasyon vb.)
+                    service_keywords = [
+                        'dj team', 'dj hizmeti', 'dj kiralama', 'düğün dj', 'dugun dj',
+                        'organizasyon', 'event planner', 'etkinlik', 'after party',
+                        'ses sistemi', 'ışık sistemi', 'isik sistemi', 'sahne kiralama',
+                        'catering', 'ikram hizmeti', 'parti organizasyon'
+                    ]
+                    service_types = ['event_planner', 'wedding_service', 'catering_service']
+
+                    is_service_by_name = any(keyword in place_name_lower for keyword in service_keywords)
+                    is_service_by_type = any(stype in place_types for stype in service_types)
+
+                    # "DJ" kelimesi + night_club/bar tipi yoksa hizmet firması
+                    has_dj_in_name = 'dj' in place_name_lower
+                    is_actual_venue = any(t in place_types for t in ['night_club', 'bar', 'restaurant', 'cafe'])
+
+                    if is_service_by_name or is_service_by_type or (has_dj_in_name and not is_actual_venue):
+                        print(f"❌ HİZMET FİRMASI REJECT - {place_name}: mekan değil hizmet firması", file=sys.stderr, flush=True)
+                        continue
+
                     # Fotoğraf URL'si
                     photo_url = None
                     if place.get('photos') and len(place['photos']) > 0:
@@ -4053,6 +4073,27 @@ def generate_venues(request):
 
                 if is_pavyon_name or is_pavyon_type:
                     print(f"❌ PAVYON REJECT - {place_name}: uygunsuz mekan", file=sys.stderr, flush=True)
+                    continue
+
+                # ===== HİZMET FİRMASI FİLTRESİ =====
+                # DJ hizmeti, organizasyon firmaları, event planner vb. mekan değil hizmet veren firmalar
+                service_keywords = [
+                    'dj team', 'dj hizmeti', 'dj kiralama', 'düğün dj', 'dugun dj',
+                    'organizasyon', 'event planner', 'etkinlik', 'after party',
+                    'ses sistemi', 'ışık sistemi', 'isik sistemi', 'sahne kiralama',
+                    'catering', 'ikram hizmeti', 'parti organizasyon'
+                ]
+                service_types = ['event_planner', 'wedding_service', 'catering_service']
+
+                is_service_by_name = any(keyword in place_name_lower for keyword in service_keywords)
+                is_service_by_type = any(stype in place_types for stype in service_types)
+
+                # "DJ" kelimesi + night_club/bar tipi yoksa hizmet firması
+                has_dj_in_name = 'dj' in place_name_lower
+                is_actual_venue = any(t in place_types for t in ['night_club', 'bar', 'restaurant', 'cafe'])
+
+                if is_service_by_name or is_service_by_type or (has_dj_in_name and not is_actual_venue):
+                    print(f"❌ HİZMET FİRMASI REJECT - {place_name}: mekan değil hizmet firması (types: {place_types})", file=sys.stderr, flush=True)
                     continue
 
                 # ===== RATING & REVIEW COUNT FİLTRESİ =====
