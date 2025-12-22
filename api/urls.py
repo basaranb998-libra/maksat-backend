@@ -26,9 +26,6 @@ urlpatterns = [
     path('venues/search/', views.search_venues, name='search-venues'),
     path('venues/similar/', views.get_similar_venues, name='similar-venues'),
 
-    # Travel endpoints
-    path('travel/logistics/', views.get_travel_logistics, name='travel-logistics'),
-
     # Router URLs
     path('', include(router.urls)),
 ]
