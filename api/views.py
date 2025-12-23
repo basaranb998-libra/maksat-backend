@@ -3614,11 +3614,18 @@ def generate_venues(request):
         print(f"🔀 HYBRID - Cache: {len(cached_venues)} venue, API exclude: {len(api_exclude_ids)} ID", file=sys.stderr, flush=True)
 
         # ===== CACHE YETERLI İSE API ÇAĞRISINI ATLA (MALİYET OPTİMİZASYONU) =====
-        # Cache'te yeterli venue varsa direkt döndür, API çağrısı yapma
-        MIN_VENUES_REQUIRED = 5  # Minimum gösterilecek venue sayısı
-        if len(cached_venues) >= MIN_VENUES_REQUIRED:
+        # Cache'te 10+ venue varsa direkt döndür, API çağrısı yapma
+        # "Daha Fazla Mekan" butonuna basılırsa excludeIds dolu gelir ve API'ye gider
+        MIN_VENUES_FOR_CACHE_ONLY = 10  # 10 mekan varsa cache yeterli
+        is_load_more_request = bool(exclude_ids) and len(exclude_ids) > 0
+
+        if len(cached_venues) >= MIN_VENUES_FOR_CACHE_ONLY and not is_load_more_request:
             print(f"✅ CACHE HIT - {len(cached_venues)} venue cache'ten döndürülüyor, API çağrısı atlandı!", file=sys.stderr, flush=True)
             return Response(cached_venues, status=status.HTTP_200_OK)
+
+        # "Daha Fazla Mekan" butonuna basıldıysa log yaz
+        if is_load_more_request:
+            print(f"🔄 LOAD MORE - excludeIds: {len(exclude_ids)}, API'ye gidiliyor...", file=sys.stderr, flush=True)
 
         # Kategori bazlı query mapping (Tatil, Michelin, Festivaller, Adrenalin, Hafta Sonu Gezintisi, Sahne Sanatları, Konserler ve Sokak Lezzeti hariç)
         # ALKOL FİLTRESİNE GÖRE DİNAMİK QUERY OLUŞTUR
