@@ -16,10 +16,10 @@ from django.utils import timezone
 
 
 # ===== CONFIGURATION =====
-# API maliyetlerini düşürmek için cache süresi uzatıldı
-CACHE_FRESH_HOURS = 72      # 0-72 saat (3 gün): Fresh
-CACHE_STALE_HOURS = 168     # 72-168 saat (7 gün): Stale (revalidate in background)
-CACHE_EXPIRED_HOURS = 168   # 168+ saat (7 gün): Expired (must refresh)
+# Dengeli cache stratejisi: Güncel kalma vs API maliyeti
+CACHE_FRESH_HOURS = 24      # 0-24 saat: Fresh (direkt cache'ten dön)
+CACHE_STALE_HOURS = 48      # 24-48 saat: Stale (cache'ten dön, arka planda refresh)
+CACHE_EXPIRED_HOURS = 48    # 48+ saat: Expired (API'ye git)
 
 # In-memory set to track ongoing refresh operations
 _refresh_in_progress: Set[str] = set()

@@ -3613,6 +3613,13 @@ def generate_venues(request):
 
         print(f"🔀 HYBRID - Cache: {len(cached_venues)} venue, API exclude: {len(api_exclude_ids)} ID", file=sys.stderr, flush=True)
 
+        # ===== CACHE YETERLI İSE API ÇAĞRISINI ATLA (MALİYET OPTİMİZASYONU) =====
+        # Cache'te yeterli venue varsa direkt döndür, API çağrısı yapma
+        MIN_VENUES_REQUIRED = 5  # Minimum gösterilecek venue sayısı
+        if len(cached_venues) >= MIN_VENUES_REQUIRED:
+            print(f"✅ CACHE HIT - {len(cached_venues)} venue cache'ten döndürülüyor, API çağrısı atlandı!", file=sys.stderr, flush=True)
+            return Response(cached_venues, status=status.HTTP_200_OK)
+
         # Kategori bazlı query mapping (Tatil, Michelin, Festivaller, Adrenalin, Hafta Sonu Gezintisi, Sahne Sanatları, Konserler ve Sokak Lezzeti hariç)
         # ALKOL FİLTRESİNE GÖRE DİNAMİK QUERY OLUŞTUR
         alcohol_filter = filters.get('alcohol', 'Any')
