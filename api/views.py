@@ -3574,7 +3574,7 @@ def generate_venues(request):
                 'Kafa Dinleme': 'lounge bar quiet restaurant',
                 'Odaklanma': 'bar restaurant lounge',
                 'Aile Yemeği': 'restaurant bar casual dining',
-                '3. Nesil Kahveci': 'wine bar restaurant',
+                '3. Nesil Kahveci': 'specialty coffee third wave coffee roastery cafe',
                 'Konserler': 'live music venue concert hall bar',
                 'Sahne Sanatları': 'theater venue performance hall',
                 'Yerel Festivaller': 'festival event venue',
