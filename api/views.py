@@ -251,7 +251,8 @@ def get_gmaps_client():
 
 
 # ===== CACHE HELPER FONKSİYONLARI (SWR - Stale-While-Revalidate) =====
-CACHE_VENUES_LIMIT = 5  # Cache'ten alınacak venue sayısı
+CACHE_VENUES_LIMIT = 10  # Cache'ten alınacak venue sayısı (normal istek için)
+CACHE_VENUES_LIMIT_LOAD_MORE = 20  # Load More için daha fazla venue çek
 
 
 def get_cached_venues_for_hybrid(category_name: str, city: str, district: str = None, exclude_ids: set = None, limit: int = 5, refresh_callback=None):
@@ -3594,10 +3595,16 @@ def generate_venues(request):
             return generate_party_venues(location, filters, exclude_ids)
 
         # ===== HYBRID CACHE SİSTEMİ =====
-        # Cache'ten 5 venue + API'den taze venue'lar = Toplam 10 venue
+        # Cache'ten venue'lar + API'den taze venue'lar = Toplam 10 venue
         city = location.get('city', 'İzmir')
         districts = location.get('districts', [])
         selected_district = districts[0] if districts else None
+
+        # Load More isteği mi kontrol et
+        is_load_more_request = bool(exclude_ids) and len(exclude_ids) > 0
+
+        # Load More durumunda cache limitini artır (daha fazla alternatif mekan bul)
+        cache_limit = CACHE_VENUES_LIMIT_LOAD_MORE if is_load_more_request else CACHE_VENUES_LIMIT
 
         # Cache'ten venue'ları ve tüm cache'li place_id'leri al
         cached_venues, all_cached_ids = get_cached_venues_for_hybrid(
@@ -3605,27 +3612,31 @@ def generate_venues(request):
             city=city,
             district=selected_district,
             exclude_ids=exclude_ids,
-            limit=CACHE_VENUES_LIMIT
+            limit=cache_limit
         )
 
         # API çağrısında cache'teki venue'ları exclude et (tekrar çekmemek için)
         api_exclude_ids = (exclude_ids or set()) | all_cached_ids
 
-        print(f"🔀 HYBRID - Cache: {len(cached_venues)} venue, API exclude: {len(api_exclude_ids)} ID", file=sys.stderr, flush=True)
+        print(f"🔀 HYBRID - Cache: {len(cached_venues)} venue, API exclude: {len(api_exclude_ids)} ID, LoadMore: {is_load_more_request}", file=sys.stderr, flush=True)
+
+        # ===== LOAD MORE: ÖNCE CACHE'TEN YENİ MEKANLAR DENE =====
+        # Cache'te henüz gösterilmemiş mekan varsa bunları döndür (API maliyeti yok!)
+        if is_load_more_request and len(cached_venues) >= 5:
+            print(f"✅ LOAD MORE CACHE HIT - {len(cached_venues)} yeni mekan cache'ten döndürülüyor!", file=sys.stderr, flush=True)
+            return Response(cached_venues[:10], status=status.HTTP_200_OK)
 
         # ===== CACHE YETERLI İSE API ÇAĞRISINI ATLA (MALİYET OPTİMİZASYONU) =====
         # Cache'te 10+ venue varsa direkt döndür, API çağrısı yapma
-        # "Daha Fazla Mekan" butonuna basılırsa excludeIds dolu gelir ve API'ye gider
         MIN_VENUES_FOR_CACHE_ONLY = 10  # 10 mekan varsa cache yeterli
-        is_load_more_request = bool(exclude_ids) and len(exclude_ids) > 0
 
         if len(cached_venues) >= MIN_VENUES_FOR_CACHE_ONLY and not is_load_more_request:
             print(f"✅ CACHE HIT - {len(cached_venues)} venue cache'ten döndürülüyor, API çağrısı atlandı!", file=sys.stderr, flush=True)
             return Response(cached_venues, status=status.HTTP_200_OK)
 
-        # "Daha Fazla Mekan" butonuna basıldıysa log yaz
+        # API'ye gitme gerekiyor - log yaz
         if is_load_more_request:
-            print(f"🔄 LOAD MORE - excludeIds: {len(exclude_ids)}, API'ye gidiliyor...", file=sys.stderr, flush=True)
+            print(f"🔄 LOAD MORE - Cache'te yetersiz mekan ({len(cached_venues)}), API'ye gidiliyor...", file=sys.stderr, flush=True)
 
         # Kategori bazlı query mapping (Tatil, Michelin, Festivaller, Adrenalin, Hafta Sonu Gezintisi, Sahne Sanatları, Konserler ve Sokak Lezzeti hariç)
         # ALKOL FİLTRESİNE GÖRE DİNAMİK QUERY OLUŞTUR
@@ -4630,23 +4641,31 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
             )
 
         # ===== HYBRID: CACHE + API VENUE'LARINI BİRLEŞTİR =====
-        # Cache venue'ları başta, API venue'ları sonra
-        # Toplam 10 venue hedefliyoruz
+        # Load More durumunda SADECE API'den gelen yeni mekanları döndür
+        # Normal durumda Cache + API birleştir
         combined_venues = []
 
-        # Önce cache'ten gelenleri ekle
-        for cv in cached_venues:
-            if len(combined_venues) < 10:
-                combined_venues.append(cv)
+        if is_load_more_request:
+            # LOAD MORE: Sadece API'den gelen yeni mekanları döndür
+            # excludeIds zaten cache + mevcut mekanları içeriyor, API sadece yenileri getirir
+            for av in venues:
+                if len(combined_venues) < 10:
+                    combined_venues.append(av)
+            print(f"🔄 LOAD MORE RESULT - API'den {len(combined_venues)} yeni mekan döndürülüyor", file=sys.stderr, flush=True)
+        else:
+            # NORMAL: Önce cache'ten gelenleri ekle
+            for cv in cached_venues:
+                if len(combined_venues) < 10:
+                    combined_venues.append(cv)
 
-        # Sonra API'den gelenleri ekle (tekrar olmaması için ID kontrolü yap)
-        existing_ids = {v.get('id') for v in combined_venues}
-        for av in venues:
-            if len(combined_venues) < 10 and av.get('id') not in existing_ids:
-                combined_venues.append(av)
-                existing_ids.add(av.get('id'))
+            # Sonra API'den gelenleri ekle (tekrar olmaması için ID kontrolü yap)
+            existing_ids = {v.get('id') for v in combined_venues}
+            for av in venues:
+                if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+                    combined_venues.append(av)
+                    existing_ids.add(av.get('id'))
 
-        print(f"🔀 HYBRID RESULT - Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
+            print(f"🔀 HYBRID RESULT - Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
 
         # Arama geçmişine kaydet
         if request.user.is_authenticated:
