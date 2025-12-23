@@ -125,6 +125,48 @@ def health_check(request):
     return Response({'status': 'ok'}, status=status.HTTP_200_OK)
 
 
+# ===== SHORTLINK ENDPOINTS =====
+import secrets
+from .models import ShortLink
+
+def generate_short_code():
+    """6 karakterlik benzersiz kısa kod üret."""
+    while True:
+        code = secrets.token_urlsafe(4)[:6]
+        if not ShortLink.objects.filter(code=code).exists():
+            return code
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def create_shortlink(request):
+    """Venue verisi için kısa link oluştur."""
+    venue_data = request.data.get('venue_data')
+    if not venue_data:
+        return Response({'error': 'venue_data gerekli'}, status=status.HTTP_400_BAD_REQUEST)
+
+    code = generate_short_code()
+    shortlink = ShortLink.objects.create(code=code, venue_data=venue_data)
+
+    return Response({
+        'code': shortlink.code,
+        'url': f"https://maksat.app/s/{shortlink.code}"
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def get_shortlink(request, code):
+    """Kısa kod ile venue verisini getir."""
+    try:
+        shortlink = ShortLink.objects.get(code=code)
+        shortlink.access_count += 1
+        shortlink.save(update_fields=['access_count'])
+        return Response(shortlink.venue_data, status=status.HTTP_200_OK)
+    except ShortLink.DoesNotExist:
+        return Response({'error': 'Link bulunamadı'}, status=status.HTTP_404_NOT_FOUND)
+
+
 # Cache stats endpoint for monitoring
 @api_view(['GET'])
 @permission_classes([permissions.AllowAny])

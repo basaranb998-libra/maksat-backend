@@ -26,6 +26,10 @@ urlpatterns = [
     path('venues/search/', views.search_venues, name='search-venues'),
     path('venues/similar/', views.get_similar_venues, name='similar-venues'),
 
+    # Shortlink endpoints
+    path('shortlink/', views.create_shortlink, name='create-shortlink'),
+    path('shortlink/<str:code>/', views.get_shortlink, name='get-shortlink'),
+
     # Router URLs
     path('', include(router.urls)),
 ]

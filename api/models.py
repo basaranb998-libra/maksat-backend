@@ -91,3 +91,19 @@ class CachedVenue(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.category} - {self.city})"
+
+
+class ShortLink(models.Model):
+    """Paylaşım için kısa linkler"""
+    code = models.CharField(max_length=8, unique=True, db_index=True)
+    venue_data = models.JSONField()  # Mekan verisi
+    created_at = models.DateTimeField(auto_now_add=True)
+    access_count = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Short Link'
+        verbose_name_plural = 'Short Links'
+
+    def __str__(self):
+        return f"{self.code} - {self.venue_data.get('n', 'Unknown')}"
