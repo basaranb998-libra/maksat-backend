@@ -2232,87 +2232,6 @@ SADECE JSON ARRAY döndür."""
         )
 
 
-def generate_mock_venues(category, location, filters):
-    """Mock venue data generator"""
-    import random
-
-    city = location['city']
-    districts = location.get('districts', [])
-    district = districts[0] if districts else city
-
-    # Kategori bazlı örnek mekanlar (butik/özel mekanlar, zincir değil)
-    mock_places = {
-        'İlk Buluşma': [
-            {'name': 'Mandabatmaz', 'type': 'Türk Kahvecisi', 'vibes': ['#Otantik', '#Tarihi', '#Romantik']},
-            {'name': 'Fazıl Bey', 'type': 'Kahveci', 'vibes': ['#Klasik', '#Sakin', '#Nostaljik']},
-            {'name': 'Kronotrop Coffee', 'type': 'Specialty Kafe', 'vibes': ['#Modern', '#Kaliteli', '#Şık']},
-            {'name': 'Dem Karaköy', 'type': 'Butik Kafe', 'vibes': ['#Sanat', '#Sohbet', '#Samimi']},
-            {'name': 'Ops Karaköy', 'type': 'Butik Kafe', 'vibes': ['#Özel', '#Romantik', '#İntim']},
-        ],
-        'Tatil': [
-            {'name': 'Lara Beach Hotel', 'type': 'Otel', 'vibes': ['#Plaj', '#HerŞeyDahil', '#Lüks']},
-            {'name': 'Rixos Premium', 'type': 'Resort', 'vibes': ['#Lüks', '#Spa', '#Aktivite']},
-            {'name': 'Maxx Royal', 'type': 'Otel', 'vibes': ['#VIP', '#Plaj', '#Gourmet']},
-        ],
-        'İş Toplantısı': [
-            {'name': 'Kronotrop Coffee Bar', 'type': 'Specialty Kafe', 'vibes': ['#Sessiz', '#WiFi', '#Profesyonel']},
-            {'name': 'Hilton Meeting Room', 'type': 'Toplantı Salonu', 'vibes': ['#İş', '#Teknoloji', '#Profesyonel']},
-        ],
-    }
-
-    # Kategoriye göre veya varsayılan mekanlar
-    places_list = mock_places.get(category['name'], mock_places['İlk Buluşma'])
-
-    venues = []
-    for idx, place_data in enumerate(places_list[:10]):
-        # Budget filtresine göre fiyat belirle
-        budget = filters.get('budget', 'Orta')
-        if budget == 'Ekonomik':
-            price_range = random.choice(['$', '$$'])
-            price_level = random.randint(1, 2)
-        elif budget == 'Lüks':
-            price_range = random.choice(['$$$', '$$$$'])
-            price_level = random.randint(3, 4)
-        else:
-            price_range = '$$'
-            price_level = 2
-
-        # Gemini ile açıklama oluştur
-        description = f"{place_data['name']}, {district} bölgesinde {category['name']} için ideal bir mekan."
-        model = get_genai_model()
-        if model:
-            try:
-                prompt = f"{place_data['name']} adlı {place_data['type']} için {category['name']} kategorisinde 2 cümlelik Türkçe açıklama yaz."
-                response = model.generate_content(prompt)
-                description = response.text.strip()
-            except:
-                pass
-
-        venue = {
-            'id': f"v{idx + 1}",
-            'name': place_data['name'],
-            'description': description,
-            'imageUrl': 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800',
-            'category': category['name'],
-            'vibeTags': place_data['vibes'],
-            'address': f"{place_data['name']}, {district}, {city}",
-            'priceRange': price_range,
-            'googleRating': round(random.uniform(4.0, 4.9), 1),
-            'noiseLevel': random.randint(30, 70),
-            'matchScore': random.randint(75, 95),
-            'metrics': {
-                'ambiance': random.randint(70, 95),
-                'accessibility': random.randint(75, 95),
-                'popularity': random.randint(70, 90)
-            }
-        }
-        venues.append(venue)
-
-    # Match score'a göre sırala
-    venues.sort(key=lambda x: x['matchScore'], reverse=True)
-    return venues
-
-
 def generate_street_food_places(location, filters, exclude_ids):
     """Sokak Lezzeti kategorisi için çoklu sorgu - her yemek türü için ayrı arama yaparak çeşitlilik sağla
     Gemini ile practicalInfo, atmosphereSummary ve enriched description eklenir.
@@ -3761,9 +3680,6 @@ def generate_venues(request):
 
         # Google Places API'den mekan ara
         gmaps = get_gmaps_client()
-
-        # Google Places API çalışmazsa mock data kullan
-        use_mock_data = not gmaps
         places_result = {'results': []}
 
         # Nearby Search için uygun kategoriler (Meyhane hariç - text search daha iyi sonuç veriyor)
@@ -3842,13 +3758,11 @@ def generate_venues(request):
                                     places_data = response.json()
                                     places_result = {'results': places_data.get('places', [])}
                                 else:
-                                    use_mock_data = True
+                                    print(f"❌ Text Search fallback hatası: {response.status_code}", file=sys.stderr, flush=True)
                         else:
                             print(f"⚠️ Geocode sonuç bulunamadı: {search_location}", file=sys.stderr, flush=True)
-                            use_mock_data = True
                     else:
-                        print(f"Geocode hatası: {geocode_response.status_code}", file=sys.stderr, flush=True)
-                        use_mock_data = True
+                        print(f"❌ Geocode hatası: {geocode_response.status_code}", file=sys.stderr, flush=True)
                 else:
                     # Diğer kategoriler için Text Search kullan
                     url = "https://places.googleapis.com/v1/places:searchText"
@@ -3866,17 +3780,15 @@ def generate_venues(request):
                         places_data = response.json()
                         places_result = {'results': places_data.get('places', [])}
                     else:
-                        print(f"Places API hatası: {response.status_code} - {response.text}", file=sys.stderr, flush=True)
-                        use_mock_data = True
+                        print(f"❌ Places API hatası: {response.status_code} - {response.text}", file=sys.stderr, flush=True)
 
             except Exception as e:
-                print(f"Google Places API hatası: {e}")
-                use_mock_data = True
+                print(f"❌ Google Places API hatası: {e}", file=sys.stderr, flush=True)
 
-        # Mock data kullanılacaksa örnek mekanlar oluştur
-        if use_mock_data or not places_result.get('results'):
-            mock_venues = generate_mock_venues(category, location, filters)
-            return Response(mock_venues, status=status.HTTP_200_OK)
+        # Google Places sonuç bulamadıysa boş liste dön (mock data ASLA kullanılmaz)
+        if not places_result.get('results'):
+            print(f"⚠️ NO RESULTS - Google Places sonuç bulamadı: {category.get('name', 'Unknown')} / {location}", file=sys.stderr, flush=True)
+            return Response([], status=status.HTTP_200_OK)
 
         # ===== PHASE 1: Google Places'dan mekanları topla ve ön-filtrele =====
         venues = []
