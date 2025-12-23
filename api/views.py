@@ -4358,6 +4358,7 @@ Her mekan için analiz yap ve JSON döndür:
   "isRelevant": true/false,
   "description": "2 cümle Türkçe - mekanın öne çıkan özelliği",
   "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
+  "instagramUrl": "https://instagram.com/kullanici_adi" | null,
   "contextScore": {{
     "first_date": 0-100,
     "business_meal": 0-100,
@@ -4439,6 +4440,7 @@ atmosphereSummary Kuralları:
 - Yorumları dikkate al (atmosfer, kalabalık, servis hakkında ipuçları içerir)
 - vibeTags Türkçe ve # ile başlamalı
 - practicalInfo bilgileri YALNIZCA yorumlardan çıkarılmalı, yoksa null yaz
+- instagramUrl: Mekanın resmi Instagram hesabını biliyorsan tam URL ver (https://instagram.com/kullanici_adi). Emin değilsen null yaz. UYDURMA!
 
 SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
@@ -4498,7 +4500,7 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                             'googleMapsUrl': place['google_maps_url'],
                             'googleReviews': place.get('google_reviews', []),
                             'website': place.get('website', ''),
-                            'instagramUrl': place.get('instagram_url', ''),
+                            'instagramUrl': ai_data.get('instagramUrl') or place.get('instagram_url', ''),
                             'phoneNumber': place.get('phone_number', ''),
                             'hours': place.get('hours', ''),
                             'weeklyHours': place.get('weeklyHours', []),
