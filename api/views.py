@@ -3670,6 +3670,7 @@ def generate_venues(request):
                 'Fine Dining': 'fine dining restaurant wine bar michelin gourmet upscale luxury tasting menu',
                 'Balıkçı': 'balık restoranı seafood restaurant rakı balık',
                 'Meyhane': 'meyhane rakı meze',
+                'Ocakbaşı': 'ocakbaşı kebap ızgara restoran mangal',
             }
         elif alcohol_filter == 'Non-Alcoholic':
             # Alkolsüz mekan seçilirse SADECE cafe, bakery, coffee shop ara
@@ -3697,6 +3698,7 @@ def generate_venues(request):
                 'Adrenalin': 'adventure sports extreme activities',
                 'Spor': 'gym fitness yoga studio pilates',
                 'Fine Dining': 'fine dining restaurant gourmet upscale',
+                'Ocakbaşı': 'ocakbaşı kebap ızgara restoran mangal',
             }
         else:
             # Any seçilirse her türlü mekan (varsayılan)
@@ -3729,6 +3731,7 @@ def generate_venues(request):
                 'Sokak Lezzeti': 'kokoreç midye balık ekmek tantuni lahmacun pide söğüş çiğköfte döner',
                 'Burger & Fast': 'burger hamburger fast food',
                 'Pizzacı': 'pizza pizzeria italian pizza',
+                'Ocakbaşı': 'ocakbaşı kebap ızgara restoran mangal',
             }
 
         # Kategori ve filtrelere göre arama sorgusu oluştur
@@ -4408,6 +4411,26 @@ KESINLIKLE REDDEDİLECEK MEKANLAR (isRelevant: false):
 ÖRNEKLER:
 ✅ Reset Pub, Varuna Gezgin, rePublic, Mississippi Blues Bar, Craft Beer Lab → KABUL
 ❌ Argo Meyhane, Alsancak Olive Meyhane, Ateş Ocakbaşı → REDDET (meyhane/ocakbaşı)
+"""
+            # Ocakbaşı kategorisi için özel talimat - isminde "ocakbaşı" geçen mekanlar
+            elif category['name'] == 'Ocakbaşı':
+                category_instruction = """
+ÖNEMLİ UYARI - OCAKBAŞI KATEGORİSİ DEĞERLENDİRMESİ:
+Bu kategori için SADECE isminde "Ocakbaşı" geçen restoranları kabul et. Bu çok kritik bir filtre!
+
+KABUL EDİLECEK MEKANLAR (isRelevant: true):
+- İsminde "Ocakbaşı" kelimesi GEÇEN restoranlar
+- Örnek: "Ateş Ocakbaşı", "Ali Baba Ocakbaşı", "Ciğerci Ocakbaşı", "Tarihi Ocakbaşı" vb.
+
+KESINLIKLE REDDEDİLECEK MEKANLAR (isRelevant: false):
+- İsminde "Ocakbaşı" kelimesi GEÇMEYEN restoranlar
+- Sadece kebapçı, ızgara, mangal konseptli ama isminde Ocakbaşı yazmayan yerler
+- Meyhane, balık restoranı, cafe, bar
+- Örnek: "Adana Kebap", "Köfteci Ali", "Mangal Evi" → REDDET (isminde ocakbaşı yok!)
+
+ÖRNEKLER:
+✅ Ateş Ocakbaşı, Ali Ocakbaşı, Tarihi Urfa Ocakbaşı → KABUL (isminde "Ocakbaşı" var)
+❌ Adana Sofrası, Kebapçı Mahmut, Mangal Köşesi → REDDET (isminde "Ocakbaşı" yok)
 """
 
             batch_prompt = f"""Kategori: {category['name']}
