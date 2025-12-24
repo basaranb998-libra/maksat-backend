@@ -322,6 +322,40 @@ def get_cached_venues_for_hybrid(category_name: str, city: str, district: str = 
     return venues_data, all_cached_ids
 
 
+def enrich_cached_venues_with_instagram(venues: list, city: str) -> list:
+    """
+    Cache'den dönen venue'lara Instagram URL discovery uygula.
+    Sadece instagramUrl'si boş olan venue'lar için Google CSE ile arama yapar.
+    """
+    if not venues:
+        return venues
+
+    enriched_count = 0
+    for venue in venues:
+        # Instagram URL'si zaten varsa atla
+        existing_instagram = venue.get('instagramUrl', '')
+        if existing_instagram and 'instagram.com/' in existing_instagram:
+            continue
+
+        # Instagram URL'si yok, discovery yap
+        instagram_url = discover_instagram_url(
+            venue_name=venue.get('name', ''),
+            city=city,
+            website=venue.get('website'),
+            existing_instagram=existing_instagram if existing_instagram else None
+        )
+
+        if instagram_url:
+            venue['instagramUrl'] = instagram_url
+            enriched_count += 1
+            print(f"🔗 INSTAGRAM ENRICH - {venue.get('name')}: {instagram_url}", file=sys.stderr, flush=True)
+
+    if enriched_count > 0:
+        print(f"✨ INSTAGRAM ENRICH - {enriched_count}/{len(venues)} venue zenginleştirildi", file=sys.stderr, flush=True)
+
+    return venues
+
+
 def save_venues_to_cache(venues: list, category_name: str, city: str, district: str = None, neighborhood: str = None):
     """
     Venue'ları cache'e kaydeder (SWR metadata ile).
@@ -3586,7 +3620,9 @@ def generate_venues(request):
         # Cache'te henüz gösterilmemiş mekan varsa bunları döndür (API maliyeti yok!)
         if is_load_more_request and len(cached_venues) >= 5:
             print(f"✅ LOAD MORE CACHE HIT - {len(cached_venues)} yeni mekan cache'ten döndürülüyor!", file=sys.stderr, flush=True)
-            return Response(cached_venues[:10], status=status.HTTP_200_OK)
+            # Instagram URL enrichment - cache'deki eksik Instagram URL'lerini bul
+            enriched_venues = enrich_cached_venues_with_instagram(cached_venues[:10], city)
+            return Response(enriched_venues, status=status.HTTP_200_OK)
 
         # ===== CACHE YETERLI İSE API ÇAĞRISINI ATLA (MALİYET OPTİMİZASYONU) =====
         # Cache'te 10+ venue varsa direkt döndür, API çağrısı yapma
@@ -3594,7 +3630,9 @@ def generate_venues(request):
 
         if len(cached_venues) >= MIN_VENUES_FOR_CACHE_ONLY and not is_load_more_request:
             print(f"✅ CACHE HIT - {len(cached_venues)} venue cache'ten döndürülüyor, API çağrısı atlandı!", file=sys.stderr, flush=True)
-            return Response(cached_venues, status=status.HTTP_200_OK)
+            # Instagram URL enrichment - cache'deki eksik Instagram URL'lerini bul
+            enriched_venues = enrich_cached_venues_with_instagram(cached_venues, city)
+            return Response(enriched_venues, status=status.HTTP_200_OK)
 
         # API'ye gitme gerekiyor - log yaz
         if is_load_more_request:
@@ -4441,7 +4479,7 @@ atmosphereSummary Kuralları:
 - Yorumları dikkate al (atmosfer, kalabalık, servis hakkında ipuçları içerir)
 - vibeTags Türkçe ve # ile başlamalı
 - practicalInfo bilgileri YALNIZCA yorumlardan çıkarılmalı, yoksa null yaz
-- instagramUrl: Mekanın resmi Instagram hesabını biliyorsan tam URL ver (https://instagram.com/kullanici_adi). Emin değilsen null yaz. UYDURMA!
+- instagramUrl: Mekanın resmi Instagram hesabını bul. Türkiye'deki mekanların Instagram'ı genellikle mekan_ismi, mekanadi, mekanismişehir formatındadır. Örnek: "Atakent Meyhanesi" → "https://instagram.com/atakent_meyhanesi". Bilinen popüler mekanların Instagram'ını ver. Emin olmadığın veya çok küçük/yerel mekanlar için null yaz.
 
 SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
