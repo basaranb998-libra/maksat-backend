@@ -2374,6 +2374,374 @@ SADECE JSON ARRAY döndür."""
         )
 
 
+def generate_bar_venues(location, filters, exclude_ids):
+    """İş Çıkışı Bira & Kokteyl kategorisi için çoklu sorgu - her bar türü için ayrı arama yaparak çeşitlilik sağla
+    Gemini ile practicalInfo, atmosphereSummary ve enriched description eklenir.
+    """
+    import json
+    import sys
+    import requests
+    import re
+
+    city = location['city']
+    districts = location.get('districts', [])
+    neighborhoods = location.get('neighborhoods', [])
+    selected_district = districts[0] if districts else None
+    selected_neighborhood = neighborhoods[0] if neighborhoods else None
+
+    # ===== HYBRID CACHE SİSTEMİ =====
+    exclude_ids_set = set(exclude_ids) if exclude_ids else set()
+    cached_venues, all_cached_ids = get_cached_venues_for_hybrid(
+        category_name='İş Çıkışı Bira & Kokteyl',
+        city=city,
+        district=selected_district,
+        exclude_ids=exclude_ids_set,
+        limit=CACHE_VENUES_LIMIT
+    )
+    api_exclude_ids = exclude_ids_set | all_cached_ids
+    print(f"🔀 HYBRID - İş Çıkışı Bira & Kokteyl Cache: {len(cached_venues)}, API exclude: {len(api_exclude_ids)}", file=sys.stderr, flush=True)
+
+    # Lokasyon string'i oluştur
+    if selected_neighborhood:
+        search_location = f"{selected_neighborhood}, {selected_district}, {city}"
+    elif selected_district:
+        search_location = f"{selected_district}, {city}"
+    else:
+        search_location = city
+
+    print(f"🍺 İş Çıkışı Bira & Kokteyl (Multi-Query): {search_location}", file=sys.stderr, flush=True)
+
+    # Her bar türü için ayrı sorgu - çeşitlilik sağlamak için
+    bar_queries = [
+        ('pub', 'Pub'),
+        ('irish pub', 'Irish Pub'),
+        ('craft beer bar', 'Craft Beer'),
+        ('cocktail bar', 'Kokteyl Bar'),
+        ('blues bar rock bar', 'Blues/Rock Bar'),
+        ('gastropub', 'Gastropub'),
+        ('beer garden bira bahçesi', 'Bira Bahçesi'),
+        ('sports bar', 'Sports Bar'),
+        ('live music bar canlı müzik bar', 'Canlı Müzik'),
+    ]
+
+    all_venues = []
+    seen_place_ids = set(api_exclude_ids)  # Duplicate önleme
+
+    try:
+        for query_term, bar_type in bar_queries:
+            if len(all_venues) >= 15:  # Yeterli mekan bulundu
+                break
+
+            search_query = f"{query_term} {search_location}"
+            print(f"🔍 Bar Query: {search_query}", file=sys.stderr, flush=True)
+
+            # Google Places API Text Search
+            api_url = "https://places.googleapis.com/v1/places:searchText"
+            headers = {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': settings.GOOGLE_PLACES_API_KEY,
+                'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.priceLevel,places.types,places.photos,places.websiteUri,places.googleMapsUri,places.currentOpeningHours,places.reviews'
+            }
+
+            body = {
+                'textQuery': search_query,
+                'languageCode': 'tr',
+                'maxResultCount': 5  # Her sorgu için 5 sonuç
+            }
+
+            try:
+                response = requests.post(api_url, headers=headers, json=body, timeout=10)
+                if response.status_code != 200:
+                    print(f"⚠️ Bar API error for {bar_type}: {response.status_code}", file=sys.stderr, flush=True)
+                    continue
+
+                data = response.json()
+                places = data.get('places', [])
+
+                for place in places:
+                    place_id = place.get('id', '')
+                    if place_id in seen_place_ids:
+                        continue
+
+                    # Temel filtreler
+                    place_types = place.get('types', [])
+                    place_name = place.get('displayName', {}).get('text', '')
+                    place_rating = place.get('rating', 0)
+                    place_review_count = place.get('userRatingCount', 0)
+
+                    # Meyhane, ocakbaşı, kebap gibi yerleri filtrele
+                    excluded_keywords = ['meyhane', 'ocakbaşı', 'kebap', 'kebapçı', 'köfte', 'balık', 'fasıl', 'türkü', 'lokanta', 'restoran', 'restaurant']
+                    name_lower = place_name.lower()
+                    if any(kw in name_lower for kw in excluded_keywords):
+                        print(f"❌ BAR FILTER - {place_name}: excluded keyword", file=sys.stderr, flush=True)
+                        continue
+
+                    # Minimum kalite
+                    if place_rating < 3.8 or place_review_count < 20:
+                        continue
+
+                    seen_place_ids.add(place_id)
+
+                    # Fotoğraf URL
+                    photos = place.get('photos', [])
+                    photo_url = None
+                    if photos:
+                        photo_name = photos[0].get('name', '')
+                        if photo_name:
+                            photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?maxHeightPx=800&maxWidthPx=800&key={settings.GOOGLE_PLACES_API_KEY}"
+
+                    # Price level
+                    price_level = place.get('priceLevel', 'PRICE_LEVEL_MODERATE')
+                    price_map = {
+                        'PRICE_LEVEL_FREE': '₺',
+                        'PRICE_LEVEL_INEXPENSIVE': '₺₺',
+                        'PRICE_LEVEL_MODERATE': '₺₺₺',
+                        'PRICE_LEVEL_EXPENSIVE': '₺₺₺₺',
+                        'PRICE_LEVEL_VERY_EXPENSIVE': '₺₺₺₺₺'
+                    }
+                    price_range = price_map.get(price_level, '₺₺₺')
+
+                    # Google yorumları
+                    raw_reviews = place.get('reviews', [])
+                    google_reviews = []
+                    for r in raw_reviews[:5]:
+                        google_reviews.append({
+                            'text': r.get('text', {}).get('text', ''),
+                            'rating': r.get('rating', 5),
+                            'author': r.get('authorAttribution', {}).get('displayName', 'Anonim'),
+                            'time': r.get('relativePublishTimeDescription', '')
+                        })
+
+                    # Vibe tags
+                    vibe_tags = ['#İşÇıkışı', f'#{bar_type.replace(" ", "").replace("/", "")}', '#AfterWork']
+
+                    venue = {
+                        'id': place_id,
+                        'name': place_name,
+                        'base_description': f"{place_name}, {bar_type.lower()} konseptinde iş çıkışı için ideal bir mekan.",
+                        'imageUrl': photo_url or 'https://images.unsplash.com/photo-1514933651103-005eec06c04b?w=800',
+                        'category': 'İş Çıkışı Bira & Kokteyl',
+                        'barType': bar_type,
+                        'vibeTags': vibe_tags,
+                        'address': place.get('formattedAddress', ''),
+                        'priceRange': price_range,
+                        'googleRating': place_rating,
+                        'googleReviewCount': place_review_count,
+                        'matchScore': min(95, int(place_rating * 20 + min(place_review_count / 50, 10))),
+                        'noiseLevel': 65,
+                        'googleMapsUrl': place.get('googleMapsUri', ''),
+                        'googleReviews': google_reviews,
+                        'google_reviews': google_reviews,
+                        'website': place.get('websiteUri', ''),
+                        'hours': place.get('currentOpeningHours', {}).get('weekdayDescriptions', []),
+                    }
+                    all_venues.append(venue)
+                    print(f"✅ Bar Found: {place_name} ({bar_type}) - {place_rating}⭐", file=sys.stderr, flush=True)
+
+            except Exception as e:
+                print(f"⚠️ Bar query error for {bar_type}: {e}", file=sys.stderr, flush=True)
+                continue
+
+        venues = all_venues[:10]  # En fazla 10 venue
+
+        # ===== GEMİNİ İLE ZENGİNLEŞTİRME =====
+        if venues:
+            try:
+                gemini_api_key = settings.GEMINI_API_KEY
+                gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_api_key}"
+
+                # Pratik bilgi içeren yorumları seç
+                practical_keywords = ['rezervasyon', 'fiyat', 'pahalı', 'ucuz', 'servis', 'garson', 'atmosfer',
+                                     'müzik', 'kalabalık', 'sakin', 'happy hour', 'canlı', 'kokteyl', 'bira']
+
+                places_list_items = []
+                for i, v in enumerate(venues[:10]):
+                    reviews_text = ""
+                    if v.get('google_reviews'):
+                        practical_reviews = []
+                        other_reviews = []
+                        for r in v['google_reviews']:
+                            text = r.get('text', '').lower()
+                            if any(kw in text for kw in practical_keywords):
+                                practical_reviews.append(r)
+                            else:
+                                other_reviews.append(r)
+                        selected_reviews = practical_reviews[:3] + other_reviews[:2]
+                        top_reviews = [r.get('text', '')[:350] for r in selected_reviews if r.get('text')]
+                        if top_reviews:
+                            reviews_text = f" | Yorumlar: {' /// '.join(top_reviews)}"
+
+                    bar_note = f" | Tür: {v.get('barType', '')}"
+                    places_list_items.append(
+                        f"{i+1}. {v['name']} | Rating: {v.get('googleRating', 'N/A')}{bar_note}{reviews_text}"
+                    )
+                places_list = "\n".join(places_list_items)
+
+                batch_prompt = f"""Kategori: İş Çıkışı Bira & Kokteyl
+Kullanıcı Tercihleri: İş çıkışı, bira, kokteyl, pub, after-work drinks
+
+Mekanlar ve Yorumları:
+{places_list}
+
+Her mekan için analiz yap ve JSON döndür:
+{{
+  "name": "Mekan Adı",
+  "description": "2 cümle Türkçe - mekanın öne çıkan özelliği, atmosferi",
+  "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
+  "instagramUrl": "https://instagram.com/kullanici_adi" | null,
+  "practicalInfo": {{
+    "reservationNeeded": "Tavsiye Edilir" | "Şart" | "Gerekli Değil" | null,
+    "crowdLevel": "Sakin" | "Orta" | "Kalabalık" | null,
+    "happyHour": "Var" | "Yok" | null,
+    "outdoorSeating": true | false | null,
+    "liveMusic": true | false | null,
+    "sportsTv": true | false | null,
+    "mustTry": "Önerilen içecek" | null
+  }},
+  "atmosphereSummary": {{
+    "noiseLevel": "Sessiz" | "Sohbet Dostu" | "Canlı" | "Gürültülü",
+    "lighting": "Loş" | "Yumuşak" | "Aydınlık",
+    "energy": "Sakin" | "Dengeli" | "Enerjik",
+    "idealFor": ["iş çıkışı", "arkadaşlarla buluşma"],
+    "notIdealFor": ["romantik akşam"],
+    "oneLiner": "Bir cümle özet"
+  }}
+}}
+
+SADECE JSON array döndür, başka açıklama ekleme. [{{}}, {{}}, ...]"""
+
+                gemini_body = {
+                    "contents": [{"parts": [{"text": batch_prompt}]}],
+                    "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4000}
+                }
+
+                gemini_response = requests.post(gemini_url, json=gemini_body, timeout=30)
+
+                if gemini_response.status_code == 200:
+                    gemini_data = gemini_response.json()
+                    response_text = gemini_data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '[]')
+                    response_text = re.sub(r'```json\s*|\s*```', '', response_text).strip()
+
+                    try:
+                        ai_results = json.loads(response_text)
+                    except json.JSONDecodeError:
+                        match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                        if match:
+                            ai_results = json.loads(match.group())
+                        else:
+                            print(f"⚠️ Bar Gemini JSON parse edilemedi, fallback kullanılıyor", file=sys.stderr, flush=True)
+                            ai_results = []
+
+                    ai_by_name = {r.get('name', '').lower(): r for r in ai_results}
+
+                    final_venues = []
+                    for venue_data in venues[:10]:
+                        ai_data = ai_by_name.get(venue_data['name'].lower(), {})
+
+                        venue = {
+                            'id': venue_data['id'],
+                            'name': venue_data['name'],
+                            'description': ai_data.get('description', venue_data['base_description']),
+                            'imageUrl': venue_data['imageUrl'],
+                            'category': 'İş Çıkışı Bira & Kokteyl',
+                            'vibeTags': ai_data.get('vibeTags', venue_data.get('vibeTags', ['#AfterWork'])),
+                            'address': venue_data['address'],
+                            'priceRange': venue_data['priceRange'],
+                            'googleRating': venue_data.get('googleRating', 4.0),
+                            'googleReviewCount': venue_data.get('googleReviewCount', 0),
+                            'matchScore': venue_data['matchScore'],
+                            'noiseLevel': venue_data['noiseLevel'],
+                            'googleMapsUrl': venue_data['googleMapsUrl'],
+                            'googleReviews': venue_data.get('googleReviews', []),
+                            'website': venue_data.get('website', ''),
+                            'hours': venue_data.get('hours', []),
+                            'instagramUrl': ai_data.get('instagramUrl'),
+                            'practicalInfo': ai_data.get('practicalInfo', {}),
+                            'atmosphereSummary': ai_data.get('atmosphereSummary', {
+                                'noiseLevel': 'Canlı',
+                                'lighting': 'Loş',
+                                'energy': 'Enerjik',
+                                'idealFor': ['iş çıkışı', 'arkadaşlarla'],
+                                'notIdealFor': [],
+                                'oneLiner': 'İş çıkışı için ideal bir bar.'
+                            })
+                        }
+                        final_venues.append(venue)
+
+                    print(f"✅ Gemini ile {len(final_venues)} Bar mekanı zenginleştirildi", file=sys.stderr, flush=True)
+
+                    # ===== CACHE'E KAYDET =====
+                    if final_venues:
+                        save_venues_to_cache(
+                            venues=final_venues,
+                            category_name='İş Çıkışı Bira & Kokteyl',
+                            city=city,
+                            district=selected_district,
+                            neighborhood=selected_neighborhood
+                        )
+
+                    # ===== HYBRID: CACHE + API BİRLEŞTİR =====
+                    combined_venues = []
+                    for cv in cached_venues:
+                        if len(combined_venues) < 10:
+                            combined_venues.append(cv)
+                    existing_ids = {v.get('id') for v in combined_venues}
+                    for av in final_venues:
+                        if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+                            combined_venues.append(av)
+                            existing_ids.add(av.get('id'))
+
+                    print(f"🔀 HYBRID RESULT - Bar Cache: {len(cached_venues)}, API: {len(final_venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
+                    return Response(combined_venues, status=status.HTTP_200_OK)
+
+            except Exception as e:
+                print(f"❌ Gemini Bar hatası: {e}", file=sys.stderr, flush=True)
+                for venue_data in venues:
+                    venue_data['description'] = venue_data.pop('base_description', venue_data.get('description', ''))
+                    venue_data['practicalInfo'] = {}
+                    venue_data['atmosphereSummary'] = {
+                        'noiseLevel': 'Canlı',
+                        'lighting': 'Loş',
+                        'energy': 'Enerjik',
+                        'idealFor': ['iş çıkışı'],
+                        'notIdealFor': [],
+                        'oneLiner': 'İş çıkışı için ideal bir bar.'
+                    }
+
+        # ===== CACHE'E KAYDET (Gemini başarısız olursa) =====
+        if venues:
+            save_venues_to_cache(
+                venues=venues,
+                category_name='İş Çıkışı Bira & Kokteyl',
+                city=city,
+                district=selected_district,
+                neighborhood=selected_neighborhood
+            )
+
+        # ===== HYBRID: CACHE + API =====
+        combined_venues = []
+        for cv in cached_venues:
+            if len(combined_venues) < 10:
+                combined_venues.append(cv)
+        existing_ids = {v.get('id') for v in combined_venues}
+        for av in venues:
+            if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+                combined_venues.append(av)
+                existing_ids.add(av.get('id'))
+
+        print(f"🔀 HYBRID RESULT - Bar Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
+        return Response(combined_venues, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"❌ Bar generation error: {e}", file=sys.stderr, flush=True)
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
+        return Response(
+            {'error': f'Bar mekanları getirilirken hata: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 def generate_street_food_places(location, filters, exclude_ids):
     """Sokak Lezzeti kategorisi için çoklu sorgu - her yemek türü için ayrı arama yaparak çeşitlilik sağla
     Gemini ile practicalInfo, atmosphereSummary ve enriched description eklenir.
@@ -3650,6 +4018,10 @@ def generate_venues(request):
         # Sokak Lezzeti kategorisi için özel işlem - Gemini-first arama
         if category['name'] == 'Sokak Lezzeti':
             return generate_street_food_places(location, filters, exclude_ids)
+
+        # İş Çıkışı Bira & Kokteyl kategorisi için özel işlem - çoklu sorgu
+        if category['name'] == 'İş Çıkışı Bira & Kokteyl':
+            return generate_bar_venues(location, filters, exclude_ids)
 
         # Eğlence & Parti kategorisi için özel işlem - çoklu sorgu
         if category['name'] == 'Eğlence & Parti':
