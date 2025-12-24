@@ -196,6 +196,7 @@ def cache_clear_invalid(request):
     deleted_closed = 0
     deleted_missing = 0
     deleted_chains = 0
+    deleted_non_bar = 0
     venues = CachedVenue.objects.all()
 
     # Kapanmış mekan tespiti için anahtar kelimeler
@@ -259,7 +260,23 @@ def cache_clear_invalid(request):
                 if should_delete:
                     break
 
-        # 3. Romantik kategorilerde zincir mekan mı kontrol et
+        # 3. İş Çıkışı Bira & Kokteyl kategorisinde bar/pub olmayan mekanları sil
+        if not should_delete and venue.category == 'İş Çıkışı Bira & Kokteyl':
+            venue_name_lower = venue.name.lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+            # Bar/pub olduğunu gösteren kelimeler
+            bar_keywords = ['pub', 'bar', 'beer', 'bira', 'ale', 'cocktail', 'kokteyl', 'blues', 'rock', 'jazz', 'lounge']
+            # Bar/pub olmadığını gösteren kelimeler (bunlar varsa sil)
+            non_bar_keywords = ['meyhane', 'meze', 'fasil', 'türkü', 'turku', 'ocakbasi', 'kebap', 'köfte', 'kofte', 'lokanta', 'restoran', 'balık', 'balik', 'cafe', 'kahve', '%100', 'more', 'konak pier']
+
+            has_bar_keyword = any(kw in venue_name_lower for kw in bar_keywords)
+            has_non_bar_keyword = any(kw in venue_name_lower for kw in non_bar_keywords)
+
+            # Non-bar keyword varsa VE bar keyword yoksa sil
+            if has_non_bar_keyword and not has_bar_keyword:
+                should_delete = True
+                delete_reason = f"non_bar_venue:{venue.name}"
+
+        # 4. Romantik kategorilerde zincir mekan mı kontrol et
         if not should_delete and venue.category in romantic_categories:
             venue_name_lower = venue.name.lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
             for chain in chain_store_blacklist:
@@ -279,13 +296,16 @@ def cache_clear_invalid(request):
                 deleted_closed += 1
             elif delete_reason.startswith("chain_store"):
                 deleted_chains += 1
+            elif delete_reason.startswith("non_bar_venue"):
+                deleted_non_bar += 1
 
     return Response({
         'deleted': deleted_count,
         'deleted_missing_fields': deleted_missing,
         'deleted_closed_venues': deleted_closed,
         'deleted_chain_stores': deleted_chains,
-        'message': f'{deleted_count} venue cache\'den silindi ({deleted_missing} eksik alan, {deleted_closed} kapanmış mekan, {deleted_chains} zincir mağaza)'
+        'deleted_non_bar_venues': deleted_non_bar,
+        'message': f'{deleted_count} venue cache\'den silindi ({deleted_missing} eksik alan, {deleted_closed} kapanmış mekan, {deleted_chains} zincir mağaza, {deleted_non_bar} bar olmayan mekan)'
     }, status=status.HTTP_200_OK)
 
 # Initialize APIs - lazy load to avoid errors during startup
