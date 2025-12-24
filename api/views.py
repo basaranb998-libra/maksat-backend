@@ -8,6 +8,7 @@ from django.conf import settings
 import googlemaps
 import google.generativeai as genai
 import urllib.parse
+from .instagram_service import discover_instagram_url
 
 # Türkiye'deki Michelin yıldızlı ve Bib Gourmand restoranlar (2024-2025)
 # Normalized isimler - küçük harf ve Türkçe karakterler normalize edilmiş
@@ -4500,7 +4501,12 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                             'googleMapsUrl': place['google_maps_url'],
                             'googleReviews': place.get('google_reviews', []),
                             'website': place.get('website', ''),
-                            'instagramUrl': ai_data.get('instagramUrl') or place.get('instagram_url', ''),
+                            'instagramUrl': discover_instagram_url(
+                                venue_name=place['name'],
+                                city=city,
+                                website=place.get('website'),
+                                existing_instagram=ai_data.get('instagramUrl')
+                            ) or '',
                             'phoneNumber': place.get('phone_number', ''),
                             'hours': place.get('hours', ''),
                             'weeklyHours': place.get('weeklyHours', []),
@@ -4560,7 +4566,12 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                         'googleMapsUrl': place['google_maps_url'],
                         'googleReviews': place.get('google_reviews', []),
                         'website': place.get('website', ''),
-                        'instagramUrl': place.get('instagram_url', ''),
+                        'instagramUrl': discover_instagram_url(
+                            venue_name=place['name'],
+                            city=city,
+                            website=place.get('website'),
+                            existing_instagram=None
+                        ) or '',
                         'phoneNumber': place.get('phone_number', ''),
                         'hours': place.get('hours', ''),
                         'weeklyHours': place.get('weeklyHours', []),
