@@ -2382,7 +2382,9 @@ def generate_bar_venues(location, filters, exclude_ids):
     import sys
     import requests
     import re
-    from django.conf import settings
+    import os
+
+    google_api_key = os.environ.get('GOOGLE_MAPS_API_KEY')
 
     city = location['city']
     districts = location.get('districts', [])
@@ -2440,7 +2442,7 @@ def generate_bar_venues(location, filters, exclude_ids):
             api_url = "https://places.googleapis.com/v1/places:searchText"
             headers = {
                 'Content-Type': 'application/json',
-                'X-Goog-Api-Key': settings.GOOGLE_PLACES_API_KEY,
+                'X-Goog-Api-Key': google_api_key,
                 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.priceLevel,places.types,places.photos,places.websiteUri,places.googleMapsUri,places.currentOpeningHours,places.reviews'
             }
 
@@ -2489,7 +2491,7 @@ def generate_bar_venues(location, filters, exclude_ids):
                     if photos:
                         photo_name = photos[0].get('name', '')
                         if photo_name:
-                            photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?maxHeightPx=800&maxWidthPx=800&key={settings.GOOGLE_PLACES_API_KEY}"
+                            photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?maxHeightPx=800&maxWidthPx=800&key={google_api_key}"
 
                     # Price level
                     price_level = place.get('priceLevel', 'PRICE_LEVEL_MODERATE')
