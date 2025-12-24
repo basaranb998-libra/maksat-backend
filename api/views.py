@@ -4383,6 +4383,32 @@ Bu kategori için meyhane karakteri taşıyan mekanları değerlendir. DİKKATL�
 - Fast food, cafe, tatlıcı gibi alakasız mekanları REDDET (isRelevant: false)
 - "Leke", "Balıkçı", "Fasıl", "Meyhane" gibi kelimeler genellikle meyhane karakteri taşır
 """
+            # İş Çıkışı Bira & Kokteyl kategorisi için özel talimat
+            elif category['name'] == 'İş Çıkışı Bira & Kokteyl':
+                category_instruction = """
+ÖNEMLİ UYARI - İŞ ÇIKIŞI BİRA & KOKTEYL KATEGORİSİ DEĞERLENDİRMESİ:
+Bu kategori için SADECE bar, pub, bira evi, kokteyl bar konseptinde mekanları değerlendir. DİKKATLİCE filtrele:
+
+KABUL EDİLECEK MEKANLAR (isRelevant: true):
+- Pub, bar, bira evi, gastropub, craft beer bar
+- Kokteyl barları, speakeasy barlar
+- Canlı müzikli rock/blues barları
+- After-work drinks için uygun mekanlar
+- "Pub", "Bar", "Blues", "Rock", "Beer", "Bira", "Ale", "Cocktail" gibi isimler
+
+KESINLIKLE REDDEDİLECEK MEKANLAR (isRelevant: false):
+- MEYHANE, meze evi, rakı sofraları (bunlar Meyhane kategorisine aittir!)
+- Ocakbaşı, kebapçı, ızgara restoranları
+- Balık restoranları, balıkçılar
+- Geleneksel Türk mutfağı lokantaları
+- Cafe, kahveci, tatlıcı
+- Fast food restoranları
+- "Meyhane", "Meze", "Fasıl", "Ocakbaşı", "Kebap", "Balık" içeren isimler
+
+ÖRNEKLER:
+✅ Reset Pub, Varuna Gezgin, rePublic, Mississippi Blues Bar, Craft Beer Lab → KABUL
+❌ Argo Meyhane, Alsancak Olive Meyhane, Ateş Ocakbaşı → REDDET (meyhane/ocakbaşı)
+"""
 
             batch_prompt = f"""Kategori: {category['name']}
 Kullanıcı Tercihleri: {preferences_text}
