@@ -4481,21 +4481,24 @@ KESINLIKLE REDDEDİLECEK MEKANLAR (isRelevant: false):
             elif category['name'] == 'Ocakbaşı':
                 category_instruction = """
 ÖNEMLİ UYARI - OCAKBAŞI KATEGORİSİ DEĞERLENDİRMESİ:
-Bu kategori için SADECE isminde "Ocakbaşı" geçen restoranları kabul et. Bu çok kritik bir filtre!
+Bu kategori için SADECE isminde "Ocakbaşı" geçen VE Google rating'i 3.9 ve üzeri olan restoranları kabul et!
 
 KABUL EDİLECEK MEKANLAR (isRelevant: true):
 - İsminde "Ocakbaşı" kelimesi GEÇEN restoranlar
-- Örnek: "Ateş Ocakbaşı", "Ali Baba Ocakbaşı", "Ciğerci Ocakbaşı", "Tarihi Ocakbaşı" vb.
+- Google rating'i 3.9 veya üzeri olan mekanlar
+- Örnek: "Ateş Ocakbaşı" (4.2), "Ali Baba Ocakbaşı" (4.0), "Tarihi Ocakbaşı" (4.5) vb.
 
 KESINLIKLE REDDEDİLECEK MEKANLAR (isRelevant: false):
 - İsminde "Ocakbaşı" kelimesi GEÇMEYEN restoranlar
+- Google rating'i 3.9'un ALTINDA olan mekanlar (düşük puanlı yerler)
 - Sadece kebapçı, ızgara, mangal konseptli ama isminde Ocakbaşı yazmayan yerler
 - Meyhane, balık restoranı, cafe, bar
 - Örnek: "Adana Kebap", "Köfteci Ali", "Mangal Evi" → REDDET (isminde ocakbaşı yok!)
 
 ÖRNEKLER:
-✅ Ateş Ocakbaşı, Ali Ocakbaşı, Tarihi Urfa Ocakbaşı → KABUL (isminde "Ocakbaşı" var)
-❌ Adana Sofrası, Kebapçı Mahmut, Mangal Köşesi → REDDET (isminde "Ocakbaşı" yok)
+✅ Ateş Ocakbaşı (4.2 rating), Ali Ocakbaşı (4.0 rating) → KABUL (isminde "Ocakbaşı" var VE rating >= 3.9)
+❌ Ucuz Ocakbaşı (3.5 rating) → REDDET (rating 3.9'un altında!)
+❌ Adana Sofrası, Kebapçı Mahmut → REDDET (isminde "Ocakbaşı" yok)
 """
 
             batch_prompt = f"""Kategori: {category['name']}
