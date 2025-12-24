@@ -197,6 +197,14 @@ def cache_clear_invalid(request):
     deleted_missing = 0
     deleted_chains = 0
     deleted_non_bar = 0
+
+    # HIZLI FIX: İş Çıkışı Bira & Kokteyl kategorisindeki TÜM mekanları sil
+    # Bu kategori yanlış mekanlarla dolu, tamamen temizlenmeli
+    deleted_bar_category = CachedVenue.objects.filter(category='İş Çıkışı Bira & Kokteyl').delete()[0]
+    if deleted_bar_category > 0:
+        print(f"🗑️ CACHE DELETE - İş Çıkışı Bira & Kokteyl kategorisi tamamen temizlendi: {deleted_bar_category} venue", file=sys.stderr, flush=True)
+        deleted_count += deleted_bar_category
+
     venues = CachedVenue.objects.all()
 
     # Kapanmış mekan tespiti için anahtar kelimeler
