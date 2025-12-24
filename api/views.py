@@ -2382,6 +2382,7 @@ def generate_bar_venues(location, filters, exclude_ids):
     import sys
     import requests
     import re
+    from django.conf import settings
 
     city = location['city']
     districts = location.get('districts', [])
