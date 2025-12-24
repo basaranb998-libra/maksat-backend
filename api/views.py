@@ -308,6 +308,43 @@ def cache_clear_invalid(request):
         'message': f'{deleted_count} venue cache\'den silindi ({deleted_missing} eksik alan, {deleted_closed} kapanmış mekan, {deleted_chains} zincir mağaza, {deleted_non_bar} bar olmayan mekan)'
     }, status=status.HTTP_200_OK)
 
+
+# Belirli bir kategorinin cache'ini sil
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def cache_clear_category(request):
+    """
+    Belirli bir kategorinin cache'ini tamamen siler.
+    Body: { "category": "İş Çıkışı Bira & Kokteyl", "city": "İzmir" (optional) }
+    """
+    import sys
+
+    category = request.data.get('category')
+    city = request.data.get('city')
+
+    if not category:
+        return Response({'error': 'category gerekli'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Build query
+    query = CachedVenue.objects.filter(category=category)
+    if city:
+        query = query.filter(city__iexact=city)
+
+    # Count and delete
+    count = query.count()
+    query.delete()
+
+    location_info = f"{category}" + (f" / {city}" if city else "")
+    print(f"🗑️ CACHE CLEAR CATEGORY - {location_info}: {count} venue silindi", file=sys.stderr, flush=True)
+
+    return Response({
+        'deleted': count,
+        'category': category,
+        'city': city,
+        'message': f'{count} venue {location_info} kategorisinden silindi'
+    }, status=status.HTTP_200_OK)
+
+
 # Initialize APIs - lazy load to avoid errors during startup
 def get_gmaps_client():
     return googlemaps.Client(key=settings.GOOGLE_MAPS_API_KEY) if settings.GOOGLE_MAPS_API_KEY else None

@@ -14,6 +14,7 @@ urlpatterns = [
     # Cache monitoring
     path('cache/stats/', views.cache_stats, name='cache-stats'),
     path('cache/clear-invalid/', views.cache_clear_invalid, name='cache-clear-invalid'),
+    path('cache/clear-category/', views.cache_clear_category, name='cache-clear-category'),
 
     # Authentication
     path('auth/register/', views.register, name='register'),
