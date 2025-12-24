@@ -4061,16 +4061,22 @@ def generate_venues(request):
         if is_load_more_request:
             if len(cached_venues) >= 5:
                 print(f"✅ LOAD MORE CACHE HIT - {len(cached_venues)} yeni mekan cache'ten döndürülüyor!", file=sys.stderr, flush=True)
-                # Instagram URL enrichment - cache'deki eksik Instagram URL'lerini bul
                 enriched_venues = enrich_cached_venues_with_instagram(cached_venues[:10], city)
                 return Response(enriched_venues, status=status.HTTP_200_OK)
-            elif len(cached_venues) == 0:
-                # Cache'te hiç yeni mekan kalmadı - hasMore: false ile boş dön
-                print(f"⚠️ LOAD MORE - Cache'te gösterilmemiş mekan kalmadı, hasMore=false döndürülüyor", file=sys.stderr, flush=True)
+            elif len(cached_venues) > 0:
+                # 1-4 venue kaldı - bunları dön ve hasMore: false de (API aynı mekanları döndürür)
+                print(f"⚠️ LOAD MORE - Son {len(cached_venues)} mekan döndürülüyor, hasMore=false", file=sys.stderr, flush=True)
+                enriched_venues = enrich_cached_venues_with_instagram(cached_venues, city)
+                return Response({
+                    'venues': enriched_venues,
+                    'hasMore': False
+                }, status=status.HTTP_200_OK)
+            else:
+                # Cache'te hiç yeni mekan kalmadı
+                print(f"⚠️ LOAD MORE - Cache'te gösterilmemiş mekan kalmadı", file=sys.stderr, flush=True)
                 return Response({
                     'venues': [],
-                    'hasMore': False,
-                    'message': 'Bu bölgede gösterilebilecek daha fazla mekan bulunamadı.'
+                    'hasMore': False
                 }, status=status.HTTP_200_OK)
 
         # ===== CACHE YETERLI İSE API ÇAĞRISINI ATLA (MALİYET OPTİMİZASYONU) =====
