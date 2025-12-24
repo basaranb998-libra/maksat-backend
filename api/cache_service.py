@@ -176,9 +176,24 @@ def get_venues_with_swr(
         # Collect all cached place_ids (for API exclusion)
         all_cached_ids = {v.place_id for v in cached_venues}
 
-        # Filter by exclude_ids
+        # Filter by exclude_ids - check both place_id AND venue_data['id']
+        # Frontend sends venue_data['id'] but we store as place_id
         if exclude_ids:
-            cached_venues = [v for v in cached_venues if v.place_id not in exclude_ids]
+            def should_exclude(v):
+                # Check database place_id
+                if v.place_id in exclude_ids:
+                    return True
+                # Also check venue_data id (what frontend sees)
+                venue_id = v.venue_data.get('id', '') if v.venue_data else ''
+                if venue_id and venue_id in exclude_ids:
+                    return True
+                return False
+
+            original_count = len(cached_venues)
+            cached_venues = [v for v in cached_venues if not should_exclude(v)]
+            filtered_count = original_count - len(cached_venues)
+            if filtered_count > 0:
+                print(f"🚫 SWR - Excluded {filtered_count} venues from cache (exclude_ids: {len(exclude_ids)})", file=sys.stderr, flush=True)
 
         # Get venue data (limited)
         venues_data = [v.venue_data for v in cached_venues[:limit]]
