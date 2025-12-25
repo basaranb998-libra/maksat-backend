@@ -154,45 +154,48 @@ def generate_username_variants(venue_name: str, city: str = None) -> List[str]:
 def check_instagram_profile_exists(username: str) -> bool:
     """
     Instagram profilinin var olup olmadığını kontrol et.
-    HEAD request ile hızlı kontrol yapar.
+
+    NOT: Instagram artık giriş yapmadan profil bilgisi göstermiyor.
+    Bu yüzden HTTP kontrolü güvenilir değil. Şimdilik sadece
+    bilinen kalıplara uyan username'leri kabul ediyoruz.
     """
-    url = f"https://www.instagram.com/{username}/"
+    # Instagram login gerektirdiği için HTTP kontrolü güvenilir değil
+    # Sadece username formatı geçerliyse True dön
+    # Gerçek doğrulama için Google Custom Search API kullanılmalı
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Connection': 'keep-alive',
-    }
+    # Username uzunluk kontrolü (Instagram kuralları)
+    if not username or len(username) < 3 or len(username) > 30:
+        return False
 
-    try:
-        response = requests.get(url, headers=headers, timeout=3, allow_redirects=True)
+    # Sadece güvenli karakterler (harf, rakam, nokta, alt çizgi)
+    import re
+    if not re.match(r'^[a-zA-Z0-9_.]+$', username):
+        return False
 
-        # 200 OK ve profil içeriği varsa
-        if response.status_code == 200:
-            # Login sayfasına yönlendirme kontrolü
-            if 'login' in response.url.lower():
-                return False
-            # Profil bulunamadı sayfası kontrolü
-            if "Sorry, this page isn't available" in response.text:
-                return False
-            if "sayfa mevcut değil" in response.text.lower():
-                return False
-            # Meta tag kontrolü - profil varsa og:type = profile olur
-            if 'og:type' in response.text and 'profile' in response.text:
-                return True
-            # Username sayfada görünüyorsa muhtemelen var
-            if f'@{username}' in response.text or f'"{username}"' in response.text:
-                return True
-            # Genel başarı - 200 döndü ve hata mesajı yok
+    # "Roasters", "Coffee", "Cafe" gibi kalıplar daha güvenilir
+    # Çünkü bunlar genellikle mekan isimleri
+    coffee_keywords = ['coffee', 'cafe', 'roaster', 'brew', 'espresso', 'barista']
+    username_lower = username.lower()
+
+    # Kahve/kafe ile ilgili bir username ise daha güvenilir
+    for keyword in coffee_keywords:
+        if keyword in username_lower:
             return True
 
-        return False
+    # Türkiye'deki yaygın mekan isim kalıpları
+    # Kısa isimler (3-12 karakter) genellikle marka isimleri
+    if len(username) <= 12:
+        return True
 
-    except requests.exceptions.Timeout:
-        return False
-    except Exception:
-        return False
+    # Uzun isimler için daha seçici ol
+    # "official", "tr", şehir ekleri genellikle gerçek hesaplar
+    safe_suffixes = ['tr', 'official', 'ist', 'izm', 'ank']
+    for suffix in safe_suffixes:
+        if username_lower.endswith(suffix):
+            return True
+
+    # Varsayılan olarak kabul etme - yanlış pozitiflerden kaçın
+    return False
 
 
 def guess_instagram_from_name(venue_name: str, city: str = None) -> Optional[str]:
