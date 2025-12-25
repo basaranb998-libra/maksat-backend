@@ -2,26 +2,226 @@
 Instagram URL Discovery Service
 
 Bu servis, mekan ismi ve şehir bilgisi kullanarak
-Google Custom Search API ile Instagram profil URL'lerini bulur.
+Instagram profil URL'lerini bulur.
+
+Yöntemler:
+1. Mevcut Instagram URL varsa kullan
+2. Website'ten Instagram linki çek
+3. Mekan adından username tahmin et ve profil varlığını kontrol et
+4. Google Custom Search API ile ara (opsiyonel)
 """
 
 import os
 import re
 import sys
 import requests
-from typing import Optional, Dict, Any
-from urllib.parse import quote_plus
+from typing import Optional, Dict, List
 from functools import lru_cache
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Google Custom Search API credentials
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
-GOOGLE_CSE_ID = os.environ.get('GOOGLE_CSE_ID')  # Custom Search Engine ID
+GOOGLE_CSE_ID = os.environ.get('GOOGLE_CSE_ID')
 
 # Cache için basit in-memory storage
 _instagram_cache: Dict[str, str] = {}
 _cache_expiry: Dict[str, float] = {}
 CACHE_TTL = 86400 * 7  # 7 gün
+
+# Türkçe karakter dönüşüm tablosu
+TR_CHAR_MAP = {
+    'ı': 'i', 'İ': 'i', 'ğ': 'g', 'Ğ': 'g',
+    'ü': 'u', 'Ü': 'u', 'ş': 's', 'Ş': 's',
+    'ö': 'o', 'Ö': 'o', 'ç': 'c', 'Ç': 'c',
+    'â': 'a', 'Â': 'a', 'î': 'i', 'Î': 'i',
+    'û': 'u', 'Û': 'u', 'ê': 'e', 'Ê': 'e'
+}
+
+# Mekan adından çıkarılacak kelimeler
+WORDS_TO_REMOVE = [
+    'restaurant', 'restoran', 'cafe', 'kafe', 'kahve', 'coffee',
+    'bar', 'pub', 'meyhane', 'ocakbasi', 'ocakbaşı', 'kebap', 'kebab',
+    'et', 'balik', 'balık', 'fish', 'steak', 'house', 'evi', 'evi̇',
+    'kitchen', 'mutfak', 'bistro', 'brasserie', 'lounge', 'terrace', 'teras',
+    'garden', 'bahce', 'bahçe', 'roof', 'rooftop', 'çatı',
+    'the', 'and', '&', 've', 'by', 'at'
+]
+
+# Şehir kısaltmaları
+CITY_ABBREVIATIONS = {
+    'istanbul': ['ist', 'istanbull'],
+    'izmir': ['izm'],
+    'ankara': ['ank'],
+    'antalya': ['ant'],
+    'bursa': ['brs'],
+    'adana': ['adn'],
+}
+
+
+def turkish_to_ascii(text: str) -> str:
+    """Türkçe karakterleri ASCII'ye çevir."""
+    result = text.lower()
+    for tr_char, ascii_char in TR_CHAR_MAP.items():
+        result = result.replace(tr_char, ascii_char)
+    return result
+
+
+def generate_username_variants(venue_name: str, city: str = None) -> List[str]:
+    """
+    Mekan adından olası Instagram username'lerini üret.
+
+    Örnek: "Köşebaşı Et Lokantası" →
+    ['kosebasi', 'kosebasitr', 'kosebasi_ist', 'kosebasi.istanbul',
+     'kosebasietlokantasi', 'kosebasi_et', 'thekosebasi']
+    """
+    variants = []
+
+    # Temel temizlik
+    name = venue_name.strip()
+    name_ascii = turkish_to_ascii(name)
+
+    # Özel karakterleri temizle
+    name_clean = re.sub(r'[^\w\s]', '', name_ascii)
+    words = name_clean.split()
+
+    # Gereksiz kelimeleri çıkar
+    core_words = [w for w in words if w.lower() not in WORDS_TO_REMOVE]
+    if not core_words:
+        core_words = words[:2]  # En az 2 kelime al
+
+    # Temel username (tüm kelimeler birleşik)
+    base_username = ''.join(core_words)
+    if len(base_username) >= 3:
+        variants.append(base_username)
+
+    # İlk kelime (genellikle mekan adı)
+    if core_words:
+        first_word = core_words[0]
+        if len(first_word) >= 3:
+            variants.append(first_word)
+            variants.append(f"{first_word}tr")
+            variants.append(f"{first_word}_tr")
+            variants.append(f"the{first_word}")
+
+            # Şehir eklentileri
+            if city:
+                city_ascii = turkish_to_ascii(city.lower())
+                variants.append(f"{first_word}{city_ascii}")
+                variants.append(f"{first_word}_{city_ascii}")
+                variants.append(f"{first_word}.{city_ascii}")
+
+                # Şehir kısaltmaları
+                city_abbrevs = CITY_ABBREVIATIONS.get(city_ascii, [])
+                for abbr in city_abbrevs:
+                    variants.append(f"{first_word}{abbr}")
+                    variants.append(f"{first_word}_{abbr}")
+
+    # İlk iki kelime (alt çizgi ile)
+    if len(core_words) >= 2:
+        two_words = f"{core_words[0]}_{core_words[1]}"
+        variants.append(two_words)
+        two_words_no_underscore = f"{core_words[0]}{core_words[1]}"
+        variants.append(two_words_no_underscore)
+
+    # Nokta ile ayrılmış
+    if len(core_words) >= 2:
+        dotted = '.'.join(core_words)
+        variants.append(dotted)
+
+    # Resmi hesap formatları
+    if base_username:
+        variants.append(f"{base_username}official")
+        variants.append(f"{base_username}_official")
+
+    # Duplicate'ları kaldır ve sırala (kısa olanlar önce)
+    seen = set()
+    unique_variants = []
+    for v in variants:
+        v_lower = v.lower()
+        # Instagram username kuralları: 1-30 karakter, harf/rakam/nokta/alt çizgi
+        if v_lower not in seen and len(v_lower) >= 3 and len(v_lower) <= 30:
+            if re.match(r'^[a-zA-Z0-9_.]+$', v_lower):
+                seen.add(v_lower)
+                unique_variants.append(v_lower)
+
+    # Kısa olanları önce dene
+    unique_variants.sort(key=len)
+
+    return unique_variants[:10]  # Max 10 variant dene
+
+
+def check_instagram_profile_exists(username: str) -> bool:
+    """
+    Instagram profilinin var olup olmadığını kontrol et.
+    HEAD request ile hızlı kontrol yapar.
+    """
+    url = f"https://www.instagram.com/{username}/"
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Connection': 'keep-alive',
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=3, allow_redirects=True)
+
+        # 200 OK ve profil içeriği varsa
+        if response.status_code == 200:
+            # Login sayfasına yönlendirme kontrolü
+            if 'login' in response.url.lower():
+                return False
+            # Profil bulunamadı sayfası kontrolü
+            if "Sorry, this page isn't available" in response.text:
+                return False
+            if "sayfa mevcut değil" in response.text.lower():
+                return False
+            # Meta tag kontrolü - profil varsa og:type = profile olur
+            if 'og:type' in response.text and 'profile' in response.text:
+                return True
+            # Username sayfada görünüyorsa muhtemelen var
+            if f'@{username}' in response.text or f'"{username}"' in response.text:
+                return True
+            # Genel başarı - 200 döndü ve hata mesajı yok
+            return True
+
+        return False
+
+    except requests.exceptions.Timeout:
+        return False
+    except Exception:
+        return False
+
+
+def guess_instagram_from_name(venue_name: str, city: str = None) -> Optional[str]:
+    """
+    Mekan adından Instagram URL'si tahmin et ve doğrula.
+    """
+    variants = generate_username_variants(venue_name, city)
+
+    if not variants:
+        return None
+
+    # Paralel olarak kontrol et (hızlı sonuç için)
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {}
+        for username in variants[:6]:  # İlk 6 variant'ı dene
+            future = executor.submit(check_instagram_profile_exists, username)
+            futures[future] = username
+
+        for future in as_completed(futures, timeout=10):
+            username = futures[future]
+            try:
+                if future.result():
+                    instagram_url = f"https://instagram.com/{username}"
+                    print(f"✅ INSTAGRAM - Guessed from name: {venue_name} -> {instagram_url}", file=sys.stderr, flush=True)
+                    return instagram_url
+            except Exception:
+                continue
+
+    return None
 
 
 def normalize_instagram_url(url: str) -> Optional[str]:
@@ -57,10 +257,9 @@ def search_instagram_google(venue_name: str, city: str) -> Optional[str]:
     Google Custom Search API kullanarak Instagram URL'si bul.
     """
     if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
-        print("⚠️ INSTAGRAM - Google CSE API keys not configured", file=sys.stderr, flush=True)
+        # API key yoksa sessizce geç
         return None
 
-    # Search query: "venue_name city instagram"
     query = f"{venue_name} {city} instagram site:instagram.com"
 
     try:
@@ -69,7 +268,7 @@ def search_instagram_google(venue_name: str, city: str) -> Optional[str]:
             'key': GOOGLE_API_KEY,
             'cx': GOOGLE_CSE_ID,
             'q': query,
-            'num': 3,  # İlk 3 sonuç
+            'num': 3,
         }
 
         response = requests.get(url, params=params, timeout=5)
@@ -80,21 +279,14 @@ def search_instagram_google(venue_name: str, city: str) -> Optional[str]:
 
             for item in items:
                 link = item.get('link', '')
-                # Instagram profil sayfası mı?
                 if 'instagram.com/' in link:
                     normalized = normalize_instagram_url(link)
                     if normalized:
                         print(f"✅ INSTAGRAM - Found via Google CSE: {venue_name} -> {normalized}", file=sys.stderr, flush=True)
                         return normalized
-        elif response.status_code == 403:
-            print(f"⚠️ INSTAGRAM - Google CSE API quota exceeded", file=sys.stderr, flush=True)
-        else:
-            print(f"⚠️ INSTAGRAM - Google CSE error: {response.status_code}", file=sys.stderr, flush=True)
 
-    except requests.exceptions.Timeout:
-        print(f"⚠️ INSTAGRAM - Google CSE timeout for: {venue_name}", file=sys.stderr, flush=True)
-    except Exception as e:
-        print(f"❌ INSTAGRAM - Google CSE error: {e}", file=sys.stderr, flush=True)
+    except Exception:
+        pass
 
     return None
 
@@ -111,7 +303,6 @@ def find_instagram_from_website(website_url: str) -> Optional[str]:
         return normalize_instagram_url(website_url)
 
     try:
-        # Web sitesini çek
         headers = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
         }
@@ -134,10 +325,8 @@ def find_instagram_from_website(website_url: str) -> Optional[str]:
                         print(f"✅ INSTAGRAM - Found from website: {website_url} -> {normalized}", file=sys.stderr, flush=True)
                         return normalized
 
-    except requests.exceptions.Timeout:
-        pass  # Timeout, sessizce geç
-    except Exception as e:
-        pass  # Hata, sessizce geç
+    except Exception:
+        pass
 
     return None
 
@@ -154,7 +343,8 @@ def discover_instagram_url(
     Öncelik sırası:
     1. Mevcut geçerli Instagram URL'si varsa kullan
     2. Website'ten Instagram linki bul
-    3. Google Custom Search ile ara
+    3. Mekan adından username tahmin et ve doğrula
+    4. Google Custom Search ile ara (API key varsa)
 
     Args:
         venue_name: Mekan adı
@@ -190,13 +380,22 @@ def discover_instagram_url(
     if not instagram_url and website:
         instagram_url = find_instagram_from_website(website)
 
-    # 3. Google Custom Search ile ara
+    # 3. Mekan adından tahmin et ve doğrula
     if not instagram_url:
+        instagram_url = guess_instagram_from_name(venue_name, city)
+
+    # 4. Google Custom Search ile ara (API key varsa)
+    if not instagram_url and GOOGLE_API_KEY and GOOGLE_CSE_ID:
         instagram_url = search_instagram_google(venue_name, city)
 
-    # Cache'e kaydet (None da dahil - negatif cache)
+    # Cache'e kaydet (None da dahil - negatif cache, ama daha kısa süre)
     _instagram_cache[cache_key] = instagram_url
-    _cache_expiry[cache_key] = time.time() + CACHE_TTL
+    # Bulunamadıysa 1 gün, bulunduysa 7 gün cache
+    cache_duration = CACHE_TTL if instagram_url else 86400
+    _cache_expiry[cache_key] = time.time() + cache_duration
+
+    if not instagram_url:
+        print(f"⚠️ INSTAGRAM - Not found: {venue_name}", file=sys.stderr, flush=True)
 
     return instagram_url
 
