@@ -13,6 +13,7 @@ import sys
 from datetime import timedelta
 from typing import Callable, List, Dict, Any, Tuple, Set, Optional
 from django.utils import timezone
+from .gault_millau_data import enrich_venues_with_gault_millau
 
 
 # ===== CONFIGURATION =====
@@ -197,6 +198,9 @@ def get_venues_with_swr(
 
         # Get venue data (limited)
         venues_data = [v.venue_data for v in cached_venues[:limit]]
+
+        # Apply Gault & Millau enrichment to cached venues
+        venues_data = enrich_venues_with_gault_millau(venues_data)
 
         # Update last_accessed for all venues
         CachedVenue.objects.filter(
