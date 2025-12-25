@@ -25,19 +25,22 @@ GAULT_MILLAU_RESTAURANTS: Dict[str, Dict] = {
         "toques": 4,
         "award": "Yılın Şefi 2025",
         "city": "Istanbul",
-        "chef": "Fatih Tutak"
+        "chef": "Fatih Tutak",
+        "instagram": "turkfatihtutak"
     },
     "turk": {
         "toques": 4,
         "award": "Yılın Şefi 2025",
         "city": "Istanbul",
-        "chef": "Fatih Tutak"
+        "chef": "Fatih Tutak",
+        "instagram": "turkfatihtutak"
     },
     "neolokal": {
         "toques": 4,
         "award": "Prestijli Masa",
         "city": "Istanbul",
-        "chef": "Maksut Aşkar"
+        "chef": "Maksut Aşkar",
+        "instagram": "neolokal"
     },
 
     # 3 Toque
@@ -45,55 +48,64 @@ GAULT_MILLAU_RESTAURANTS: Dict[str, Dict] = {
         "toques": 3,
         "award": None,
         "city": "Istanbul",
-        "chef": "Mehmet Gürs"
+        "chef": "Mehmet Gürs",
+        "instagram": "miklaistanbul"
     },
     "nicole": {
         "toques": 3,
         "award": "Yılın Keşfi",
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "nicoleistanbul"
     },
     "sunset grill & bar": {
         "toques": 3,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "sunsetgrillbar"
     },
     "sunset grill bar": {
         "toques": 3,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "sunsetgrillbar"
     },
     "topaz": {
         "toques": 3,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "topazistanbul"
     },
     "araka": {
         "toques": 3,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "arakabogazici"
     },
     "nusr-et steakhouse": {
         "toques": 3,
         "award": None,
         "city": "Istanbul",
-        "chef": "Nusret Gökçe"
+        "chef": "Nusret Gökçe",
+        "instagram": "nuaborj"
     },
     "nusr-et": {
         "toques": 3,
         "award": None,
         "city": "Istanbul",
-        "chef": "Nusret Gökçe"
+        "chef": "Nusret Gökçe",
+        "instagram": "nuaborj"
     },
     "nusret": {
         "toques": 3,
         "award": None,
         "city": "Istanbul",
-        "chef": "Nusret Gökçe"
+        "chef": "Nusret Gökçe",
+        "instagram": "nuaborj"
     },
 
     # 2 Toque
@@ -101,127 +113,148 @@ GAULT_MILLAU_RESTAURANTS: Dict[str, Dict] = {
         "toques": 2,
         "award": "En İyi Balık Restoranı",
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "balikcisabahattin"
     },
     "balikci sabahattin": {
         "toques": 2,
         "award": "En İyi Balık Restoranı",
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "balikcisabahattin"
     },
     "çiya sofrası": {
         "toques": 2,
         "award": "En İyi Geleneksel Mutfak",
         "city": "Istanbul",
-        "chef": "Musa Dağdeviren"
+        "chef": "Musa Dağdeviren",
+        "instagram": "caborestaurants"
     },
     "ciya sofrasi": {
         "toques": 2,
         "award": "En İyi Geleneksel Mutfak",
         "city": "Istanbul",
-        "chef": "Musa Dağdeviren"
+        "chef": "Musa Dağdeviren",
+        "instagram": "caborestaurants"
     },
     "asmalı cavit": {
         "toques": 2,
         "award": "En İyi Meyhane",
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "asmalicavit"
     },
     "asmali cavit": {
         "toques": 2,
         "award": "En İyi Meyhane",
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "asmalicavit"
     },
     "lokanta maya": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": "Didem Şenol"
+        "chef": "Didem Şenol",
+        "instagram": "lokantamaya"
     },
     "kantin": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": "Şemsa Denizsel"
+        "chef": "Şemsa Denizsel",
+        "instagram": "kantinistanbul"
     },
     "pandeli": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "pandeli1901"
     },
     "develi": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "develirestaurant"
     },
     "hamdi restaurant": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "hamdirestaurant"
     },
     "hamdi": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "hamdirestaurant"
     },
     "karaköy lokantası": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "karakoylokantasi"
     },
     "karakoy lokantasi": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "karakoylokantasi"
     },
     "beyti": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "beytirestaurant"
     },
     "köşebaşı": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "kosebasiresmi"
     },
     "kosebasi": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "kosebasiresmi"
     },
     "günaydın": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "gunaydintr"
     },
     "gunaydin": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "gunaydintr"
     },
     "zübeyir ocakbaşı": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "zubeyirocakbasi"
     },
     "zubeyir ocakbasi": {
         "toques": 2,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "zubeyirocakbasi"
     },
 
     # 1 Toque - Önerilen
@@ -229,73 +262,85 @@ GAULT_MILLAU_RESTAURANTS: Dict[str, Dict] = {
         "toques": 1,
         "award": "En İyi Sokak Lezzeti",
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "sultanahmetkoftecisi1920"
     },
     "tarihi sultanahmet koftecisi": {
         "toques": 1,
         "award": "En İyi Sokak Lezzeti",
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "sultanahmetkoftecisi1920"
     },
     "sultanahmet köftecisi": {
         "toques": 1,
         "award": "En İyi Sokak Lezzeti",
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "sultanahmetkoftecisi1920"
     },
     "sultanahmet koftecisi": {
         "toques": 1,
         "award": "En İyi Sokak Lezzeti",
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "sultanahmetkoftecisi1920"
     },
     "vefa bozacısı": {
         "toques": 1,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "vefabozacisi1876"
     },
     "vefa bozacisi": {
         "toques": 1,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "vefabozacisi1876"
     },
     "karaköy güllüoğlu": {
         "toques": 1,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "karakoygulluoglu"
     },
     "karakoy gulluoglu": {
         "toques": 1,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "karakoygulluoglu"
     },
     "hafız mustafa": {
         "toques": 1,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "hafizmustafa1864"
     },
     "hafiz mustafa": {
         "toques": 1,
         "award": None,
         "city": "Istanbul",
-        "chef": None
+        "chef": None,
+        "instagram": "hafizmustafa1864"
     },
     "datça sofrası": {
         "toques": 1,
         "award": None,
         "city": "Datça",
-        "chef": None
+        "chef": None,
+        "instagram": "datcasofrasi"
     },
     "datca sofrasi": {
         "toques": 1,
         "award": None,
         "city": "Datça",
-        "chef": None
+        "chef": None,
+        "instagram": "datcasofrasi"
     },
 }
 
@@ -328,7 +373,7 @@ def get_gault_millau_info(venue_name: str) -> Optional[Dict]:
         venue_name: Mekan adı
 
     Returns:
-        {toques: int, award: str | None} veya None
+        {toques: int, award: str | None, instagram: str | None} veya None
     """
     if not venue_name:
         return None
@@ -340,7 +385,8 @@ def get_gault_millau_info(venue_name: str) -> Optional[Dict]:
         info = GAULT_MILLAU_RESTAURANTS[normalized]
         return {
             "toques": info["toques"],
-            "award": info.get("award")
+            "award": info.get("award"),
+            "instagram": info.get("instagram")
         }
 
     # Kısmi eşleşme (mekan adı içinde arama)
@@ -352,7 +398,8 @@ def get_gault_millau_info(venue_name: str) -> Optional[Dict]:
             if len(key) >= 4:
                 return {
                     "toques": info["toques"],
-                    "award": info.get("award")
+                    "award": info.get("award"),
+                    "instagram": info.get("instagram")
                 }
 
     return None
@@ -361,6 +408,7 @@ def get_gault_millau_info(venue_name: str) -> Optional[Dict]:
 def enrich_venue_with_gault_millau(venue: Dict) -> Dict:
     """
     Venue verisine Gault & Millau bilgisi ekle.
+    Instagram URL'si yoksa ve G&M verisinde varsa onu da ekler.
 
     Args:
         venue: Venue dictionary
@@ -378,6 +426,10 @@ def enrich_venue_with_gault_millau(venue: Dict) -> Dict:
         venue["gaultMillauToques"] = gm_info["toques"]
         if gm_info.get("award"):
             venue["gaultMillauAward"] = gm_info["award"]
+
+        # Instagram URL yoksa G&M verisinden ekle
+        if not venue.get("instagramUrl") and gm_info.get("instagram"):
+            venue["instagramUrl"] = f"https://instagram.com/{gm_info['instagram']}"
 
     return venue
 
