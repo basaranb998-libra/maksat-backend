@@ -9,6 +9,7 @@ import googlemaps
 import google.generativeai as genai
 import urllib.parse
 from .instagram_service import discover_instagram_url
+from .gault_millau_data import enrich_venues_with_gault_millau
 
 # Türkiye'deki Michelin yıldızlı ve Bib Gourmand restoranlar (2024-2025)
 # Normalized isimler - küçük harf ve Türkçe karakterler normalize edilmiş
@@ -5188,6 +5189,9 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                 location=search_location,
                 results_count=len(combined_venues)
             )
+
+        # Gault & Millau bilgisi ekle
+        combined_venues = enrich_venues_with_gault_millau(combined_venues)
 
         return Response(combined_venues, status=status.HTTP_200_OK)
 
