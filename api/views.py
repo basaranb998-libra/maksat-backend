@@ -5380,6 +5380,15 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
         # Instagram URL ekle (eksikse)
         combined_venues = enrich_venues_with_instagram(combined_venues)
 
+        # ===== OCAKBAŞI KATEGORİSİ İÇİN MİNİMUM RATİNG FİLTRESİ =====
+        # Gemini prompt'u takip etmese bile, 3.9 altındaki puanlı mekanları filtrele
+        if category.get('name') == 'Ocakbaşı':
+            original_count = len(combined_venues)
+            combined_venues = [v for v in combined_venues if v.get('googleRating', 0) >= 3.9]
+            filtered_count = original_count - len(combined_venues)
+            if filtered_count > 0:
+                print(f"🔒 OCAKBAŞI HARD FİLTER - {filtered_count} mekan çıkarıldı (rating < 3.9)", file=sys.stderr, flush=True)
+
         return Response(combined_venues, status=status.HTTP_200_OK)
 
     except Exception as e:
