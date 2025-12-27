@@ -107,3 +107,61 @@ class ShortLink(models.Model):
 
     def __str__(self):
         return f"{self.code} - {self.venue_data.get('n', 'Unknown')}"
+
+
+class GaultMillauVenue(models.Model):
+    """
+    Gault & Millau ödüllü restoranlar.
+    Bu restoranlar ilgili kategorilerde öncelikli olarak gösterilir.
+    """
+    # Temel bilgiler
+    name = models.CharField(max_length=255)
+    place_id = models.CharField(max_length=255, unique=True, null=True, blank=True, db_index=True)
+
+    # G&M bilgileri
+    toques = models.IntegerField(default=1)  # 1-4 toque
+    award = models.CharField(max_length=255, blank=True, null=True)  # "Yılın Şefi", "En İyi Balık" vb.
+    chef = models.CharField(max_length=255, blank=True, null=True)
+
+    # Kategori eşleştirmesi (hangi app kategorilerinde gösterilecek)
+    # JSON array: ["2", "24", "26"] gibi kategori ID'leri
+    categories = models.JSONField(default=list)
+
+    # Lokasyon
+    city = models.CharField(max_length=100, db_index=True)
+
+    # Full venue data (Google Places + Gemini'den zenginleştirilmiş)
+    venue_data = models.JSONField(null=True, blank=True)
+
+    # Sosyal medya
+    instagram = models.CharField(max_length=100, blank=True, null=True)
+    website = models.URLField(blank=True, null=True)
+
+    # Durum
+    is_active = models.BooleanField(default=True)
+    is_synced = models.BooleanField(default=False)  # Google Places ile senkronize edildi mi?
+
+    # Zamanlar
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    last_synced = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-toques', 'name']
+        verbose_name = 'Gault & Millau Venue'
+        verbose_name_plural = 'Gault & Millau Venues'
+        indexes = [
+            models.Index(fields=['city', 'is_active']),
+            models.Index(fields=['toques', 'is_active']),
+        ]
+
+    def __str__(self):
+        award_str = f" - {self.award}" if self.award else ""
+        return f"{self.name} ({self.toques} Toque{award_str})"
+
+    @property
+    def category_name(self):
+        """İlk kategori adını döndür (uyumluluk için)"""
+        if self.categories and len(self.categories) > 0:
+            return self.categories[0]
+        return "Fine Dining"

@@ -15,333 +15,279 @@ Kaynak: Gault & Millau Turkey 2025
 
 from typing import Dict, List, Optional
 
-# Gault & Millau ödüllü restoranlar
-# Key: Restoran adı (küçük harf, normalize edilmiş)
-# Value: {toques: int, award: str | None, city: str}
+# Kategori ID eşleştirmeleri (constants.ts'deki ID'ler)
+CATEGORY_FINE_DINING = "2"       # Fine Dining
+CATEGORY_MEYHANE = "24"          # Meyhane
+CATEGORY_BALIKCI = "26"          # Balıkçı
+CATEGORY_OCAKBASI = "ocakbasi"   # Ocakbaşı
+CATEGORY_KAHVALTI = "4"          # Kahvaltı
+CATEGORY_BRUNCH = "25"           # Brunch
+CATEGORY_TATLICI = "11"          # Tatlıcı
+CATEGORY_ROMANTIK = "1"          # Romantik Akşam
+CATEGORY_KEBAP = "14"            # Kebapçı
+CATEGORY_SOKAK = "sokak-lezzeti" # Sokak Lezzeti
 
-GAULT_MILLAU_RESTAURANTS: Dict[str, Dict] = {
-    # 4 Toque - En Üst Seviye
-    "türk": {
+# Gault & Millau ödüllü restoranlar
+# Her restoran için: name, toques, award, city, chef, instagram, categories
+GAULT_MILLAU_RESTAURANTS_LIST: List[Dict] = [
+    # ============ 4 TOQUE - EN ÜST SEVİYE ============
+    {
+        "name": "Türk",
         "toques": 4,
         "award": "Yılın Şefi 2025",
         "city": "Istanbul",
         "chef": "Fatih Tutak",
-        "instagram": "turkfatihtutak"
+        "instagram": "turkfatihtutak",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_ROMANTIK]
     },
-    "turk": {
-        "toques": 4,
-        "award": "Yılın Şefi 2025",
-        "city": "Istanbul",
-        "chef": "Fatih Tutak",
-        "instagram": "turkfatihtutak"
-    },
-    "neolokal": {
+    {
+        "name": "Neolokal",
         "toques": 4,
         "award": "Prestijli Masa",
         "city": "Istanbul",
         "chef": "Maksut Aşkar",
-        "instagram": "neolokal"
+        "instagram": "neolokal",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_ROMANTIK]
     },
 
-    # 3 Toque
-    "mikla": {
+    # ============ 3 TOQUE - MÜKEMMEL ============
+    {
+        "name": "Mikla",
         "toques": 3,
         "award": None,
         "city": "Istanbul",
         "chef": "Mehmet Gürs",
-        "instagram": "miklaistanbul"
+        "instagram": "miklaistanbul",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_ROMANTIK]
     },
-    "nicole": {
+    {
+        "name": "Nicole",
         "toques": 3,
         "award": "Yılın Keşfi",
         "city": "Istanbul",
         "chef": None,
-        "instagram": "nicoleistanbul"
+        "instagram": "nicoleistanbul",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_ROMANTIK]
     },
-    "sunset grill & bar": {
+    {
+        "name": "Sunset Grill & Bar",
         "toques": 3,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "sunsetgrillbar"
+        "instagram": "sunsetgrillbar",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_ROMANTIK, CATEGORY_BALIKCI]
     },
-    "sunset grill bar": {
+    {
+        "name": "Topaz",
         "toques": 3,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "sunsetgrillbar"
+        "instagram": "topazistanbul",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_ROMANTIK]
     },
-    "topaz": {
+    {
+        "name": "Araka",
         "toques": 3,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "topazistanbul"
+        "instagram": "arakabogazici",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_ROMANTIK, CATEGORY_BALIKCI]
     },
-    "araka": {
-        "toques": 3,
-        "award": None,
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "arakabogazici"
-    },
-    "nusr-et steakhouse": {
+    {
+        "name": "Nusr-Et Steakhouse",
         "toques": 3,
         "award": None,
         "city": "Istanbul",
         "chef": "Nusret Gökçe",
-        "instagram": "nuaborj"
-    },
-    "nusr-et": {
-        "toques": 3,
-        "award": None,
-        "city": "Istanbul",
-        "chef": "Nusret Gökçe",
-        "instagram": "nuaborj"
-    },
-    "nusret": {
-        "toques": 3,
-        "award": None,
-        "city": "Istanbul",
-        "chef": "Nusret Gökçe",
-        "instagram": "nuaborj"
+        "instagram": "nusr_et",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_OCAKBASI]
     },
 
-    # 2 Toque
-    "balıkçı sabahattin": {
+    # ============ 2 TOQUE - ÇOK İYİ ============
+    {
+        "name": "Balıkçı Sabahattin",
         "toques": 2,
         "award": "En İyi Balık Restoranı",
         "city": "Istanbul",
         "chef": None,
-        "instagram": "balikcisabahattin"
+        "instagram": "balikcisabahattin",
+        "categories": [CATEGORY_BALIKCI, CATEGORY_FINE_DINING]
     },
-    "balikci sabahattin": {
-        "toques": 2,
-        "award": "En İyi Balık Restoranı",
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "balikcisabahattin"
-    },
-    "çiya sofrası": {
+    {
+        "name": "Çiya Sofrası",
         "toques": 2,
         "award": "En İyi Geleneksel Mutfak",
         "city": "Istanbul",
         "chef": "Musa Dağdeviren",
-        "instagram": "caborestaurants"
+        "instagram": "caborestaurants",
+        "categories": [CATEGORY_KEBAP, CATEGORY_KAHVALTI]
     },
-    "ciya sofrasi": {
-        "toques": 2,
-        "award": "En İyi Geleneksel Mutfak",
-        "city": "Istanbul",
-        "chef": "Musa Dağdeviren",
-        "instagram": "caborestaurants"
-    },
-    "asmalı cavit": {
+    {
+        "name": "Asmalı Cavit",
         "toques": 2,
         "award": "En İyi Meyhane",
         "city": "Istanbul",
         "chef": None,
-        "instagram": "asmalicavit"
+        "instagram": "asmalicavit",
+        "categories": [CATEGORY_MEYHANE]
     },
-    "asmali cavit": {
-        "toques": 2,
-        "award": "En İyi Meyhane",
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "asmalicavit"
-    },
-    "lokanta maya": {
+    {
+        "name": "Lokanta Maya",
         "toques": 2,
         "award": None,
         "city": "Istanbul",
         "chef": "Didem Şenol",
-        "instagram": "lokantamaya"
+        "instagram": "lokantamaya",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_BRUNCH]
     },
-    "kantin": {
+    {
+        "name": "Kantin",
         "toques": 2,
         "award": None,
         "city": "Istanbul",
         "chef": "Şemsa Denizsel",
-        "instagram": "kantinistanbul"
+        "instagram": "kantinistanbul",
+        "categories": [CATEGORY_KAHVALTI, CATEGORY_BRUNCH]
     },
-    "pandeli": {
+    {
+        "name": "Pandeli",
         "toques": 2,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "pandeli1901"
+        "instagram": "pandeli1901",
+        "categories": [CATEGORY_FINE_DINING]
     },
-    "develi": {
+    {
+        "name": "Develi",
         "toques": 2,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "develirestaurant"
+        "instagram": "develirestaurant",
+        "categories": [CATEGORY_KEBAP, CATEGORY_OCAKBASI]
     },
-    "hamdi restaurant": {
+    {
+        "name": "Hamdi Restaurant",
         "toques": 2,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "hamdirestaurant"
+        "instagram": "hamdirestaurant",
+        "categories": [CATEGORY_KEBAP, CATEGORY_OCAKBASI]
     },
-    "hamdi": {
+    {
+        "name": "Karaköy Lokantası",
         "toques": 2,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "hamdirestaurant"
+        "instagram": "karakoylokantasi",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_MEYHANE]
     },
-    "karaköy lokantası": {
+    {
+        "name": "Beyti",
         "toques": 2,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "karakoylokantasi"
+        "instagram": "beytirestaurant",
+        "categories": [CATEGORY_KEBAP, CATEGORY_OCAKBASI]
     },
-    "karakoy lokantasi": {
+    {
+        "name": "Köşebaşı",
         "toques": 2,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "karakoylokantasi"
+        "instagram": "kosebasiresmi",
+        "categories": [CATEGORY_KEBAP, CATEGORY_OCAKBASI]
     },
-    "beyti": {
+    {
+        "name": "Günaydın",
         "toques": 2,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "beytirestaurant"
+        "instagram": "gunaydintr",
+        "categories": [CATEGORY_KEBAP, CATEGORY_OCAKBASI, CATEGORY_KAHVALTI]
     },
-    "köşebaşı": {
+    {
+        "name": "Zübeyir Ocakbaşı",
         "toques": 2,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "kosebasiresmi"
-    },
-    "kosebasi": {
-        "toques": 2,
-        "award": None,
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "kosebasiresmi"
-    },
-    "günaydın": {
-        "toques": 2,
-        "award": None,
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "gunaydintr"
-    },
-    "gunaydin": {
-        "toques": 2,
-        "award": None,
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "gunaydintr"
-    },
-    "zübeyir ocakbaşı": {
-        "toques": 2,
-        "award": None,
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "zubeyirocakbasi"
-    },
-    "zubeyir ocakbasi": {
-        "toques": 2,
-        "award": None,
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "zubeyirocakbasi"
+        "instagram": "zubeyirocakbasi",
+        "categories": [CATEGORY_OCAKBASI, CATEGORY_KEBAP]
     },
 
-    # 1 Toque - Önerilen
-    "tarihi sultanahmet köftecisi": {
+    # ============ 1 TOQUE - İYİ ============
+    {
+        "name": "Tarihi Sultanahmet Köftecisi",
         "toques": 1,
         "award": "En İyi Sokak Lezzeti",
         "city": "Istanbul",
         "chef": None,
-        "instagram": "sultanahmetkoftecisi1920"
+        "instagram": "sultanahmetkoftecisi1920",
+        "categories": [CATEGORY_SOKAK, CATEGORY_KEBAP]
     },
-    "tarihi sultanahmet koftecisi": {
-        "toques": 1,
-        "award": "En İyi Sokak Lezzeti",
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "sultanahmetkoftecisi1920"
-    },
-    "sultanahmet köftecisi": {
-        "toques": 1,
-        "award": "En İyi Sokak Lezzeti",
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "sultanahmetkoftecisi1920"
-    },
-    "sultanahmet koftecisi": {
-        "toques": 1,
-        "award": "En İyi Sokak Lezzeti",
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "sultanahmetkoftecisi1920"
-    },
-    "vefa bozacısı": {
+    {
+        "name": "Vefa Bozacısı",
         "toques": 1,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "vefabozacisi1876"
+        "instagram": "vefabozacisi1876",
+        "categories": [CATEGORY_TATLICI, CATEGORY_SOKAK]
     },
-    "vefa bozacisi": {
+    {
+        "name": "Karaköy Güllüoğlu",
         "toques": 1,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "vefabozacisi1876"
+        "instagram": "karakoygulluoglu",
+        "categories": [CATEGORY_TATLICI]
     },
-    "karaköy güllüoğlu": {
+    {
+        "name": "Hafız Mustafa",
         "toques": 1,
         "award": None,
         "city": "Istanbul",
         "chef": None,
-        "instagram": "karakoygulluoglu"
+        "instagram": "hafizmustafa1864",
+        "categories": [CATEGORY_TATLICI, CATEGORY_KAHVALTI]
     },
-    "karakoy gulluoglu": {
-        "toques": 1,
-        "award": None,
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "karakoygulluoglu"
-    },
-    "hafız mustafa": {
-        "toques": 1,
-        "award": None,
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "hafizmustafa1864"
-    },
-    "hafiz mustafa": {
-        "toques": 1,
-        "award": None,
-        "city": "Istanbul",
-        "chef": None,
-        "instagram": "hafizmustafa1864"
-    },
-    "datça sofrası": {
+    {
+        "name": "Datça Sofrası",
         "toques": 1,
         "award": None,
         "city": "Datça",
         "chef": None,
-        "instagram": "datcasofrasi"
+        "instagram": "datcasofrasi",
+        "categories": [CATEGORY_KAHVALTI, CATEGORY_MEYHANE]
     },
-    "datca sofrasi": {
+    {
+        "name": "Street Bites",
         "toques": 1,
         "award": None,
-        "city": "Datça",
+        "city": "Izmir",
         "chef": None,
-        "instagram": "datcasofrasi"
+        "instagram": "streetbitesizmir",
+        "categories": [CATEGORY_SOKAK]
     },
+]
+
+# Türkçe karakter dönüşüm tablosu
+TR_CHAR_MAP = {
+    'ı': 'i', 'İ': 'i', 'ğ': 'g', 'Ğ': 'g',
+    'ü': 'u', 'Ü': 'u', 'ş': 's', 'Ş': 's',
+    'ö': 'o', 'Ö': 'o', 'ç': 'c', 'Ç': 'c',
+    'â': 'a', 'Â': 'a', 'î': 'i', 'Î': 'i',
 }
 
 
@@ -350,16 +296,8 @@ def normalize_name(name: str) -> str:
     if not name:
         return ""
 
-    # Türkçe karakter dönüşümü
-    tr_map = {
-        'ı': 'i', 'İ': 'i', 'ğ': 'g', 'Ğ': 'g',
-        'ü': 'u', 'Ü': 'u', 'ş': 's', 'Ş': 's',
-        'ö': 'o', 'Ö': 'o', 'ç': 'c', 'Ç': 'c',
-        'â': 'a', 'Â': 'a', 'î': 'i', 'Î': 'i',
-    }
-
     result = name.lower().strip()
-    for tr_char, ascii_char in tr_map.items():
+    for tr_char, ascii_char in TR_CHAR_MAP.items():
         result = result.replace(tr_char, ascii_char)
 
     return result
@@ -373,36 +311,63 @@ def get_gault_millau_info(venue_name: str) -> Optional[Dict]:
         venue_name: Mekan adı
 
     Returns:
-        {toques: int, award: str | None, instagram: str | None} veya None
+        {toques: int, award: str | None, instagram: str | None, categories: list} veya None
     """
     if not venue_name:
         return None
 
     normalized = normalize_name(venue_name)
 
-    # Tam eşleşme
-    if normalized in GAULT_MILLAU_RESTAURANTS:
-        info = GAULT_MILLAU_RESTAURANTS[normalized]
-        return {
-            "toques": info["toques"],
-            "award": info.get("award"),
-            "instagram": info.get("instagram")
-        }
+    for restaurant in GAULT_MILLAU_RESTAURANTS_LIST:
+        restaurant_normalized = normalize_name(restaurant["name"])
 
-    # Kısmi eşleşme (mekan adı içinde arama)
-    for key, info in GAULT_MILLAU_RESTAURANTS.items():
-        # Hem key'in normalized name içinde olup olmadığını
-        # hem de normalized name'in key içinde olup olmadığını kontrol et
-        if key in normalized or normalized in key:
-            # Minimum 4 karakter eşleşmesi olmalı
-            if len(key) >= 4:
+        # Tam eşleşme
+        if restaurant_normalized == normalized:
+            return {
+                "toques": restaurant["toques"],
+                "award": restaurant.get("award"),
+                "instagram": restaurant.get("instagram"),
+                "categories": restaurant.get("categories", [])
+            }
+
+        # Kısmi eşleşme (mekan adı içinde arama)
+        if len(restaurant_normalized) >= 4:
+            if restaurant_normalized in normalized or normalized in restaurant_normalized:
                 return {
-                    "toques": info["toques"],
-                    "award": info.get("award"),
-                    "instagram": info.get("instagram")
+                    "toques": restaurant["toques"],
+                    "award": restaurant.get("award"),
+                    "instagram": restaurant.get("instagram"),
+                    "categories": restaurant.get("categories", [])
                 }
 
     return None
+
+
+def get_gm_restaurants_for_category(category_id: str, city: str = None) -> List[Dict]:
+    """
+    Belirli bir kategori için G&M restoranlarını döndür.
+
+    Args:
+        category_id: Kategori ID'si (örn: "24" for Meyhane)
+        city: Şehir filtresi (opsiyonel)
+
+    Returns:
+        G&M restoran listesi
+    """
+    results = []
+
+    for restaurant in GAULT_MILLAU_RESTAURANTS_LIST:
+        # Kategori eşleşmesi kontrol et
+        if category_id in restaurant.get("categories", []):
+            # Şehir filtresi varsa uygula
+            if city and restaurant.get("city", "").lower() != city.lower():
+                continue
+            results.append(restaurant)
+
+    # Toque sayısına göre sırala (yüksekten düşüğe)
+    results.sort(key=lambda x: x["toques"], reverse=True)
+
+    return results
 
 
 def enrich_venue_with_gault_millau(venue: Dict) -> Dict:
@@ -445,3 +410,8 @@ def enrich_venues_with_gault_millau(venues: List[Dict]) -> List[Dict]:
         Güncellenmiş venue listesi
     """
     return [enrich_venue_with_gault_millau(v) for v in venues]
+
+
+def get_all_gm_restaurants() -> List[Dict]:
+    """Tüm G&M restoranlarını döndür."""
+    return GAULT_MILLAU_RESTAURANTS_LIST.copy()

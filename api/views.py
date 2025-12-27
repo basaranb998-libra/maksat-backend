@@ -103,7 +103,7 @@ def is_michelin_restaurant(venue_name):
 
     return None
 
-from .models import FavoriteVenue, SearchHistory, UserProfile, CachedVenue
+from .models import FavoriteVenue, SearchHistory, UserProfile, CachedVenue, GaultMillauVenue
 from django.utils import timezone
 from datetime import timedelta
 from .cache_service import (
@@ -358,6 +358,78 @@ def cache_clear_category(request):
 # Initialize APIs - lazy load to avoid errors during startup
 def get_gmaps_client():
     return googlemaps.Client(key=settings.GOOGLE_MAPS_API_KEY) if settings.GOOGLE_MAPS_API_KEY else None
+
+
+# ===== GAULT & MILLAU HELPER FONKSİYONLARI =====
+# Kategori ID -> Kategori adı eşleştirmesi
+CATEGORY_ID_TO_NAME = {
+    "2": "Fine Dining",
+    "24": "Meyhane",
+    "26": "Balıkçı",
+    "ocakbasi": "Ocakbaşı",
+    "4": "Kahvaltı",
+    "25": "Brunch",
+    "11": "Tatlıcı",
+    "1": "Romantik Akşam",
+    "14": "Kebapçı",
+    "sokak-lezzeti": "Sokak Lezzeti",
+}
+
+# Kategori adı -> ID eşleştirmesi (ters lookup)
+CATEGORY_NAME_TO_ID = {v: k for k, v in CATEGORY_ID_TO_NAME.items()}
+
+
+def get_gm_venues_for_category(category_id: str, category_name: str, city: str, exclude_ids: set = None) -> list:
+    """
+    Belirli bir kategori için Gault & Millau restoranlarını veritabanından çeker.
+    Sync edilmiş ve aktif olan restoranları döner.
+
+    Args:
+        category_id: Kategori ID'si (örn: "24" for Meyhane)
+        category_name: Kategori adı (örn: "Meyhane")
+        city: Şehir adı
+        exclude_ids: Hariç tutulacak place_id'ler
+
+    Returns:
+        G&M venue_data listesi (sıralanmış - yüksek toque önce)
+    """
+    import sys
+
+    try:
+        # SQLite JSONField'da __contains desteklemediği için
+        # tüm sync edilmiş G&M restoranlarını çekip Python'da filtrele
+        gm_venues = GaultMillauVenue.objects.filter(
+            is_active=True,
+            is_synced=True,
+            city__iexact=city
+        ).order_by('-toques', 'name')
+
+        venues_data = []
+        for gm_venue in gm_venues:
+            # Kategori kontrolü - Python tarafında
+            if category_id not in (gm_venue.categories or []):
+                continue
+            # Exclude ID kontrolü
+            if exclude_ids and gm_venue.place_id in exclude_ids:
+                continue
+
+            # venue_data varsa kullan
+            if gm_venue.venue_data:
+                venue = gm_venue.venue_data.copy()
+                # G&M bilgilerini ekle/güncelle
+                venue['gaultMillauToques'] = gm_venue.toques
+                if gm_venue.award:
+                    venue['gaultMillauAward'] = gm_venue.award
+                venues_data.append(venue)
+
+        if venues_data:
+            print(f"🏆 G&M - {category_name} kategorisinde {len(venues_data)} G&M restoran bulundu ({city})", file=sys.stderr, flush=True)
+
+        return venues_data
+
+    except Exception as e:
+        print(f"⚠️ G&M venue sorgusu hatası: {e}", file=sys.stderr, flush=True)
+        return []
 
 
 # ===== CACHE HELPER FONKSİYONLARI (SWR - Stale-While-Revalidate) =====
@@ -2762,8 +2834,21 @@ def generate_street_food_places(location, filters, exclude_ids):
     selected_district = districts[0] if districts else None
     selected_neighborhood = neighborhoods[0] if neighborhoods else None
 
-    # ===== HYBRID CACHE SİSTEMİ =====
+    # ===== G&M VENUE'LARI ÖNCELİKLİ OLARAK ÇEK =====
     exclude_ids_set = set(exclude_ids) if exclude_ids else set()
+    gm_venues = get_gm_venues_for_category(
+        category_id='sokak-lezzeti',
+        category_name='Sokak Lezzeti',
+        city=city,
+        exclude_ids=exclude_ids_set
+    )
+    if gm_venues:
+        print(f"🏆 G&M - Sokak Lezzeti kategorisinde {len(gm_venues)} G&M restoran bulundu ({city})", file=sys.stderr, flush=True)
+        # G&M place_id'lerini exclude listesine ekle
+        gm_place_ids = {v.get('id') for v in gm_venues if v.get('id')}
+        exclude_ids_set = exclude_ids_set | gm_place_ids
+
+    # ===== HYBRID CACHE SİSTEMİ =====
     cached_venues, all_cached_ids = get_cached_venues_for_hybrid(
         category_name='Sokak Lezzeti',
         city=city,
@@ -3104,6 +3189,23 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                         final_venues.append(venue)
 
                     print(f"✅ Gemini ile {len(final_venues)} Sokak Lezzeti mekan zenginleştirildi", file=sys.stderr, flush=True)
+
+                    # ===== G&M VENUE'LARI EN BAŞA EKLE =====
+                    if gm_venues:
+                        combined_result = []
+                        existing_ids = set()
+                        # 1. Önce G&M venue'larını ekle
+                        for gv in gm_venues:
+                            if len(combined_result) < 10:
+                                combined_result.append(gv)
+                                existing_ids.add(gv.get('id'))
+                        # 2. Sonra Gemini-enriched venue'ları ekle
+                        for fv in final_venues:
+                            if len(combined_result) < 10 and fv.get('id') not in existing_ids:
+                                combined_result.append(fv)
+                                existing_ids.add(fv.get('id'))
+                        print(f"🔀 HYBRID RESULT - G&M: {len(gm_venues)}, Gemini: {len(final_venues)}, Combined: {len(combined_result)}", file=sys.stderr, flush=True)
+                        return Response(combined_result, status=status.HTTP_200_OK)
                     return Response(final_venues, status=status.HTTP_200_OK)
 
             except Exception as e:
@@ -3132,20 +3234,29 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                 neighborhood=selected_neighborhood
             )
 
-        # ===== HYBRID: CACHE + API VENUE'LARINI BİRLEŞTİR =====
+        # ===== HYBRID: G&M + CACHE + API VENUE'LARINI BİRLEŞTİR =====
         combined_venues = []
-        # Önce cache'ten gelenleri ekle
-        for cv in cached_venues:
+        existing_ids = set()
+
+        # 1. Önce G&M venue'larını ekle (en yüksek öncelik)
+        for gv in gm_venues:
             if len(combined_venues) < 10:
+                combined_venues.append(gv)
+                existing_ids.add(gv.get('id'))
+
+        # 2. Sonra cache'ten gelenleri ekle
+        for cv in cached_venues:
+            if len(combined_venues) < 10 and cv.get('id') not in existing_ids:
                 combined_venues.append(cv)
-        # Sonra API'den gelenleri ekle (duplicate olmayanları)
-        existing_ids = {v.get('id') for v in combined_venues}
+                existing_ids.add(cv.get('id'))
+
+        # 3. Son olarak API'den gelenleri ekle (duplicate olmayanları)
         for av in venues:
             if len(combined_venues) < 10 and av.get('id') not in existing_ids:
                 combined_venues.append(av)
                 existing_ids.add(av.get('id'))
 
-        print(f"🔀 HYBRID RESULT - Sokak Lezzeti Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
+        print(f"🔀 HYBRID RESULT - Sokak Lezzeti G&M: {len(gm_venues)}, Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
         return Response(combined_venues, status=status.HTTP_200_OK)
 
     except Exception as e:
@@ -4032,14 +4143,56 @@ def generate_venues(request):
         if category['name'] == 'Eğlence & Parti':
             return generate_party_venues(location, filters, exclude_ids)
 
+        # ===== GAULT & MILLAU ÖNCELİKLİ SORGU =====
+        # Önce bu kategori için G&M restoranları var mı kontrol et
+        category_id = category.get('id', '')
+        category_name = category.get('name', '')
+        city = location.get('city', 'İstanbul')
+
+        # G&M venue'larını burada tutuyoruz (scope dışına çıkmaması için)
+        gm_venues = []
+
+        # Load More kontrolü için orijinal exclude_ids'i sakla (G&M ID'leri eklemeden önce)
+        original_exclude_ids = exclude_ids.copy() if exclude_ids else set()
+
+        # G&M desteği olan kategoriler (mapping'de tanımlı olanlar)
+        if category_id in CATEGORY_ID_TO_NAME or category_name in CATEGORY_NAME_TO_ID:
+            # Kategori ID yoksa adından bul
+            if not category_id and category_name in CATEGORY_NAME_TO_ID:
+                category_id = CATEGORY_NAME_TO_ID[category_name]
+
+            gm_venues = get_gm_venues_for_category(
+                category_id=category_id,
+                category_name=category_name,
+                city=city,
+                exclude_ids=exclude_ids
+            )
+
+            # G&M restoranları varsa bunları öncelikli olarak döndür
+            if gm_venues:
+                gm_count = len(gm_venues)
+                print(f"🏆 G&M ÖNCELİK - {gm_count} G&M restoran bulundu, listenin başına ekleniyor", file=sys.stderr, flush=True)
+
+                # Eğer 10'dan fazla G&M restoran varsa sadece ilk 10'u döndür
+                if gm_count >= 10:
+                    return Response(gm_venues[:10], status=status.HTTP_200_OK)
+
+                # 10'dan az G&M restoran var, cache/API ile tamamla
+                # G&M place_id'lerini exclude listesine ekle (tekrar çekmemek için)
+                gm_place_ids = {v.get('id') for v in gm_venues if v.get('id')}
+                if exclude_ids:
+                    exclude_ids = exclude_ids | gm_place_ids
+                else:
+                    exclude_ids = gm_place_ids
+
         # ===== HYBRID CACHE SİSTEMİ =====
         # Cache'ten venue'lar + API'den taze venue'lar = Toplam 10 venue
         city = location.get('city', 'İzmir')
         districts = location.get('districts', [])
         selected_district = districts[0] if districts else None
 
-        # Load More isteği mi kontrol et
-        is_load_more_request = bool(exclude_ids) and len(exclude_ids) > 0
+        # Load More isteği mi kontrol et (orijinal exclude_ids'e göre, G&M ID'leri dahil değil)
+        is_load_more_request = bool(original_exclude_ids) and len(original_exclude_ids) > 0
 
         # Load More durumunda cache limitini artır (daha fazla alternatif mekan bul)
         cache_limit = CACHE_VENUES_LIMIT_LOAD_MORE if is_load_more_request else CACHE_VENUES_LIMIT
@@ -4089,6 +4242,11 @@ def generate_venues(request):
             print(f"✅ CACHE HIT - {len(cached_venues)} venue cache'ten döndürülüyor, API çağrısı atlandı!", file=sys.stderr, flush=True)
             # Instagram URL enrichment - cache'deki eksik Instagram URL'lerini bul
             enriched_venues = enrich_cached_venues_with_instagram(cached_venues, city)
+            # G&M venue'larını başa ekle (varsa)
+            if gm_venues:
+                remaining_slots = 10 - len(gm_venues)
+                final_venues = gm_venues + enriched_venues[:remaining_slots]
+                return Response(final_venues, status=status.HTTP_200_OK)
             return Response(enriched_venues, status=status.HTTP_200_OK)
 
         # API'ye gitme gerekiyor - log yaz
@@ -5180,6 +5338,12 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                     existing_ids.add(av.get('id'))
 
             print(f"🔀 HYBRID RESULT - Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
+
+        # G&M venue'larını başa ekle (varsa ve LoadMore değilse)
+        if gm_venues and not is_load_more_request:
+            remaining_slots = 10 - len(gm_venues)
+            combined_venues = gm_venues + combined_venues[:remaining_slots]
+            print(f"🏆 G&M PREPEND (HYBRID) - {len(gm_venues)} G&M venue başa eklendi", file=sys.stderr, flush=True)
 
         # Arama geçmişine kaydet
         if request.user.is_authenticated:
