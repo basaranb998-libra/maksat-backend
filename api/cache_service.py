@@ -204,6 +204,9 @@ def get_venues_with_swr(
             if filtered_count > 0:
                 print(f"🚫 SWR - Excluded {filtered_count} venues from cache (exclude_ids: {len(exclude_ids)})", file=sys.stderr, flush=True)
 
+        # Sort by google_rating (descending) to show best venues first
+        cached_venues.sort(key=lambda v: v.google_rating or 0, reverse=True)
+
         # Get venue data (limited)
         venues_data = [v.venue_data for v in cached_venues[:limit]]
 
