@@ -437,7 +437,7 @@ CACHE_VENUES_LIMIT = 10  # Cache'ten alınacak venue sayısı (normal istek içi
 CACHE_VENUES_LIMIT_LOAD_MORE = 20  # Load More için daha fazla venue çek
 
 
-def get_cached_venues_for_hybrid(category_name: str, city: str, district: str = None, exclude_ids: set = None, limit: int = 5, refresh_callback=None):
+def get_cached_venues_for_hybrid(category_name: str, city: str, district: str = None, neighborhood: str = None, exclude_ids: set = None, limit: int = 5, refresh_callback=None):
     """
     Hybrid sistem için cache'ten venue'ları çeker (SWR stratejisi ile).
 
@@ -452,6 +452,7 @@ def get_cached_venues_for_hybrid(category_name: str, city: str, district: str = 
         category_name=category_name,
         city=city,
         district=district,
+        neighborhood=neighborhood,
         exclude_ids=exclude_ids,
         limit=limit,
         refresh_callback=refresh_callback
@@ -905,6 +906,7 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
     districts = location.get('districts', [])
     neighborhoods = location.get('neighborhoods', [])
     selected_district = districts[0] if districts else None
+    selected_neighborhood = neighborhoods[0] if neighborhoods else None
 
     # ===== HYBRID CACHE SİSTEMİ =====
     exclude_ids_set = set(exclude_ids) if exclude_ids else set()
@@ -912,6 +914,7 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
         category_name='Fine Dining',
         city=city,
         district=selected_district,
+        neighborhood=selected_neighborhood,
         exclude_ids=exclude_ids_set,
         limit=CACHE_VENUES_LIMIT
     )
@@ -2472,6 +2475,7 @@ def generate_bar_venues(location, filters, exclude_ids):
         category_name='İş Çıkışı Bira & Kokteyl',
         city=city,
         district=selected_district,
+        neighborhood=selected_neighborhood,
         exclude_ids=exclude_ids_set,
         limit=CACHE_VENUES_LIMIT
     )
@@ -2853,6 +2857,7 @@ def generate_street_food_places(location, filters, exclude_ids):
         category_name='Sokak Lezzeti',
         city=city,
         district=selected_district,
+        neighborhood=selected_neighborhood,
         exclude_ids=exclude_ids_set,
         limit=CACHE_VENUES_LIMIT
     )
@@ -3290,6 +3295,7 @@ def generate_party_venues(location, filters, exclude_ids):
         category_name='Eğlence & Parti',
         city=city,
         district=selected_district,
+        neighborhood=selected_neighborhood,
         exclude_ids=exclude_ids_set,
         limit=CACHE_VENUES_LIMIT
     )
@@ -4189,7 +4195,9 @@ def generate_venues(request):
         # Cache'ten venue'lar + API'den taze venue'lar = Toplam 10 venue
         city = location.get('city', 'İzmir')
         districts = location.get('districts', [])
+        neighborhoods = location.get('neighborhoods', [])
         selected_district = districts[0] if districts else None
+        selected_neighborhood = neighborhoods[0] if neighborhoods else None
 
         # Load More isteği mi kontrol et (orijinal exclude_ids'e göre, G&M ID'leri dahil değil)
         is_load_more_request = bool(original_exclude_ids) and len(original_exclude_ids) > 0
@@ -4202,6 +4210,7 @@ def generate_venues(request):
             category_name=category['name'],
             city=city,
             district=selected_district,
+            neighborhood=selected_neighborhood,
             exclude_ids=exclude_ids,
             limit=cache_limit
         )
@@ -4242,8 +4251,13 @@ def generate_venues(request):
             print(f"✅ CACHE HIT - {len(cached_venues)} venue cache'ten döndürülüyor, API çağrısı atlandı!", file=sys.stderr, flush=True)
             # Instagram URL enrichment - cache'deki eksik Instagram URL'lerini bul
             enriched_venues = enrich_cached_venues_with_instagram(cached_venues, city)
-            # G&M venue'larını başa ekle (varsa)
+            # G&M venue'larını başa ekle (varsa) - duplicate önleme ile
             if gm_venues:
+                # G&M venue ID'lerini al
+                gm_ids = {v.get('id') for v in gm_venues if v.get('id')}
+                # enriched_venues'dan G&M ID'lerini çıkar (duplicate önleme)
+                enriched_venues = [v for v in enriched_venues if v.get('id') not in gm_ids]
+                # G&M'leri başa ekle, kalan slotları doldur
                 remaining_slots = 10 - len(gm_venues)
                 final_venues = gm_venues + enriched_venues[:remaining_slots]
                 return Response(final_venues, status=status.HTTP_200_OK)
@@ -5341,9 +5355,14 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
         # G&M venue'larını başa ekle (varsa ve LoadMore değilse)
         if gm_venues and not is_load_more_request:
+            # G&M venue ID'lerini al
+            gm_ids = {v.get('id') for v in gm_venues if v.get('id')}
+            # combined_venues'dan G&M ID'lerini çıkar (duplicate önleme)
+            combined_venues = [v for v in combined_venues if v.get('id') not in gm_ids]
+            # G&M'leri başa ekle, kalan slotları doldur
             remaining_slots = 10 - len(gm_venues)
             combined_venues = gm_venues + combined_venues[:remaining_slots]
-            print(f"🏆 G&M PREPEND (HYBRID) - {len(gm_venues)} G&M venue başa eklendi", file=sys.stderr, flush=True)
+            print(f"🏆 G&M PREPEND (HYBRID) - {len(gm_venues)} G&M venue başa eklendi (duplicate temizlendi)", file=sys.stderr, flush=True)
 
         # Arama geçmişine kaydet
         if request.user.is_authenticated:

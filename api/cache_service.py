@@ -28,7 +28,7 @@ _refresh_in_progress: Set[str] = set()
 _refresh_lock = threading.Lock()
 
 
-def generate_location_key(category: str, city: str, district: str = None) -> str:
+def generate_location_key(category: str, city: str, district: str = None, neighborhood: str = None) -> str:
     """
     Generate a unique cache key for category + location combination.
     Uses MD5 hash for consistent, short keys.
@@ -36,6 +36,8 @@ def generate_location_key(category: str, city: str, district: str = None) -> str
     key_parts = [category.lower(), city.lower()]
     if district:
         key_parts.append(district.lower())
+    if neighborhood:
+        key_parts.append(neighborhood.lower())
 
     key_string = ":".join(key_parts)
     return hashlib.md5(key_string.encode()).hexdigest()[:16]
@@ -128,6 +130,7 @@ def get_venues_with_swr(
     category_name: str,
     city: str,
     district: str = None,
+    neighborhood: str = None,
     exclude_ids: Set[str] = None,
     limit: int = 5,
     fetch_and_cache_callback: Callable = None,
@@ -140,6 +143,7 @@ def get_venues_with_swr(
         category_name: Category name (e.g., "Meyhane", "Kahve")
         city: City name
         district: District name (optional)
+        neighborhood: Neighborhood name (optional)
         exclude_ids: Set of place_ids to exclude
         limit: Maximum number of venues to return from cache
         fetch_and_cache_callback: Function to fetch fresh data from API
@@ -150,7 +154,7 @@ def get_venues_with_swr(
     """
     from .models import CachedVenue
 
-    location_key = generate_location_key(category_name, city, district)
+    location_key = generate_location_key(category_name, city, district, neighborhood)
 
     try:
         # Build cache query
@@ -161,6 +165,9 @@ def get_venues_with_swr(
 
         if district:
             cache_query = cache_query.filter(district__iexact=district)
+
+        if neighborhood:
+            cache_query = cache_query.filter(neighborhood__iexact=neighborhood)
 
         # Get all cached venues for this location
         cached_venues = list(cache_query)
@@ -253,7 +260,7 @@ def save_venues_to_cache_swr(
     if not venues:
         return 0
 
-    location_key = generate_location_key(category_name, city, district)
+    location_key = generate_location_key(category_name, city, district, neighborhood)
     now = timezone.now()
     saved_count = 0
 
@@ -297,6 +304,7 @@ def get_cached_venues_for_hybrid_swr(
     category_name: str,
     city: str,
     district: str = None,
+    neighborhood: str = None,
     exclude_ids: Set[str] = None,
     limit: int = 5,
     refresh_callback: Callable = None
@@ -311,6 +319,7 @@ def get_cached_venues_for_hybrid_swr(
         category_name=category_name,
         city=city,
         district=district,
+        neighborhood=neighborhood,
         exclude_ids=exclude_ids,
         limit=limit,
         refresh_callback=refresh_callback
