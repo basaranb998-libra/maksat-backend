@@ -26,15 +26,17 @@ CATEGORY_TATLICI = "11"          # Tatlıcı
 CATEGORY_ROMANTIK = "1"          # Romantik Akşam
 CATEGORY_KEBAP = "14"            # Kebapçı
 CATEGORY_SOKAK = "sokak-lezzeti" # Sokak Lezzeti
+CATEGORY_BAR = "bar"             # Bar
+CATEGORY_LOKANTA = "lokanta"     # Geleneksel Lokanta
 
 # Gault & Millau ödüllü restoranlar
 # Her restoran için: name, toques, award, city, chef, instagram, categories
 GAULT_MILLAU_RESTAURANTS_LIST: List[Dict] = [
     # ============ 4 TOQUE - EN ÜST SEVİYE ============
     {
-        "name": "Türk",
+        "name": "TURK Fatih Tutak",
         "toques": 4,
-        "award": "Yılın Şefi 2025",
+        "award": "Yılın Şefi & En İyi Restoran Tasarımı",
         "city": "Istanbul",
         "chef": "Fatih Tutak",
         "instagram": "turkfatihtutak",
@@ -43,7 +45,7 @@ GAULT_MILLAU_RESTAURANTS_LIST: List[Dict] = [
     {
         "name": "Neolokal",
         "toques": 4,
-        "award": "Prestijli Masa",
+        "award": "En İyi Uluslararası Başarı",
         "city": "Istanbul",
         "chef": "Maksut Aşkar",
         "instagram": "neolokal",
@@ -54,7 +56,7 @@ GAULT_MILLAU_RESTAURANTS_LIST: List[Dict] = [
     {
         "name": "Mikla",
         "toques": 3,
-        "award": None,
+        "award": "En İyi Servis",
         "city": "Istanbul",
         "chef": "Mehmet Gürs",
         "instagram": "miklaistanbul",
@@ -63,9 +65,9 @@ GAULT_MILLAU_RESTAURANTS_LIST: List[Dict] = [
     {
         "name": "Nicole",
         "toques": 3,
-        "award": "Yılın Keşfi",
+        "award": "En İyi Tabak Tasarımı",
         "city": "Istanbul",
-        "chef": None,
+        "chef": "Serkan Aksoy",
         "instagram": "nicoleistanbul",
         "categories": [CATEGORY_FINE_DINING, CATEGORY_ROMANTIK]
     },
@@ -105,16 +107,52 @@ GAULT_MILLAU_RESTAURANTS_LIST: List[Dict] = [
         "instagram": "nusr_et",
         "categories": [CATEGORY_FINE_DINING, CATEGORY_OCAKBASI]
     },
+    {
+        "name": "OD Urla",
+        "toques": 3,
+        "award": "Farm to Table (Tarladan Sofraya)",
+        "city": "Izmir",
+        "chef": "Osman Sezener",
+        "instagram": "odurla",
+        "categories": [CATEGORY_FINE_DINING]
+    },
+    {
+        "name": "Vino Locale",
+        "toques": 3,
+        "award": "En İyi Tabak Tasarımı",
+        "city": "Istanbul",
+        "chef": "Ozan Kumbasar",
+        "instagram": "vinolocale",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_ROMANTIK]
+    },
+    {
+        "name": "The Peninsula Istanbul",
+        "toques": 3,
+        "award": "En İyi Pasta Şefi",
+        "city": "Istanbul",
+        "chef": "Malte Rohmann",
+        "instagram": "thelobbypeninsula",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_BRUNCH]
+    },
 
     # ============ 2 TOQUE - ÇOK İYİ ============
     {
         "name": "Balıkçı Sabahattin",
         "toques": 2,
-        "award": "En İyi Balık Restoranı",
+        "award": None,
         "city": "Istanbul",
         "chef": None,
         "instagram": "balikcisabahattin",
         "categories": [CATEGORY_BALIKCI, CATEGORY_FINE_DINING]
+    },
+    {
+        "name": "Balıkçı Kahraman",
+        "toques": 2,
+        "award": "En İyi Deniz Restoranı",
+        "city": "Muğla",
+        "chef": "Kahraman Altun",
+        "instagram": "balikcikahraman",
+        "categories": [CATEGORY_BALIKCI]
     },
     {
         "name": "Çiya Sofrası",
@@ -123,7 +161,7 @@ GAULT_MILLAU_RESTAURANTS_LIST: List[Dict] = [
         "city": "Istanbul",
         "chef": "Musa Dağdeviren",
         "instagram": "caborestaurants",
-        "categories": [CATEGORY_KEBAP, CATEGORY_KAHVALTI]
+        "categories": [CATEGORY_KEBAP, CATEGORY_KAHVALTI, CATEGORY_LOKANTA]
     },
     {
         "name": "Asmalı Cavit",
@@ -159,7 +197,7 @@ GAULT_MILLAU_RESTAURANTS_LIST: List[Dict] = [
         "city": "Istanbul",
         "chef": None,
         "instagram": "pandeli1901",
-        "categories": [CATEGORY_FINE_DINING]
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_LOKANTA]
     },
     {
         "name": "Develi",
@@ -186,7 +224,7 @@ GAULT_MILLAU_RESTAURANTS_LIST: List[Dict] = [
         "city": "Istanbul",
         "chef": None,
         "instagram": "karakoylokantasi",
-        "categories": [CATEGORY_FINE_DINING, CATEGORY_MEYHANE]
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_MEYHANE, CATEGORY_LOKANTA]
     },
     {
         "name": "Beyti",
@@ -224,12 +262,314 @@ GAULT_MILLAU_RESTAURANTS_LIST: List[Dict] = [
         "instagram": "zubeyirocakbasi",
         "categories": [CATEGORY_OCAKBASI, CATEGORY_KEBAP]
     },
+    {
+        "name": "Seraf Restaurant",
+        "toques": 2,
+        "award": "En İyi Geleneksel Lokanta",
+        "city": "Istanbul",
+        "chef": "Sinem Özler",
+        "instagram": "serafrestaurant",
+        "categories": [CATEGORY_LOKANTA, CATEGORY_FINE_DINING]
+    },
+    {
+        "name": "Töngül Pide",
+        "toques": 2,
+        "award": "En İyi Geleneksel Lokanta",
+        "city": "Izmir",
+        "chef": "Nedime Töngül Akçay",
+        "instagram": "tongulpide",
+        "categories": [CATEGORY_LOKANTA]
+    },
+    {
+        "name": "Trilye Restaurant",
+        "toques": 2,
+        "award": "Yılın Lezzet Elçisi",
+        "city": "Istanbul",
+        "chef": "Süreyya Üzmez",
+        "instagram": "trilyerestaurant",
+        "categories": [CATEGORY_BALIKCI, CATEGORY_FINE_DINING]
+    },
+    {
+        "name": "Fauna",
+        "toques": 2,
+        "award": "Yılın Lezzet Elçisi",
+        "city": "Istanbul",
+        "chef": "İbrahim Tuna",
+        "instagram": "faunaistanbul",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_LOKANTA]
+    },
+    {
+        "name": "Teruar Urla",
+        "toques": 2,
+        "award": "En İyi Sürdürülebilirlik Ödülü",
+        "city": "Izmir",
+        "chef": "Osman Serdaroğlu",
+        "instagram": "teruarurla",
+        "categories": [CATEGORY_FINE_DINING]
+    },
+    {
+        "name": "Apartıman Yeniköy",
+        "toques": 2,
+        "award": "En İyi Sürdürülebilirlik Ödülü",
+        "city": "Istanbul",
+        "chef": "Burçak Kazdal",
+        "instagram": "apartimanyenikoy",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_BRUNCH]
+    },
+    {
+        "name": "Casa Lavanda",
+        "toques": 2,
+        "award": "En İyi Sürdürülebilirlik Ödülü",
+        "city": "Istanbul",
+        "chef": "Emre Şen",
+        "instagram": "casalavandatr",
+        "categories": [CATEGORY_FINE_DINING]
+    },
+    {
+        "name": "Hiç Lokanta",
+        "toques": 2,
+        "award": "En İyi Sürdürülebilirlik Ödülü",
+        "city": "Izmir",
+        "chef": "Duygu Özerson Elekdar",
+        "instagram": "hiclokanta",
+        "categories": [CATEGORY_LOKANTA, CATEGORY_FINE_DINING]
+    },
+    {
+        "name": "Telezzüz",
+        "toques": 2,
+        "award": "En İyi Sürdürülebilirlik Ödülü",
+        "city": "Istanbul",
+        "chef": "Bahtiyar Büyükduman",
+        "instagram": "telezzuz",
+        "categories": [CATEGORY_FINE_DINING]
+    },
+    {
+        "name": "Alaf",
+        "toques": 2,
+        "award": "Mutfak Kültürü Ödülü",
+        "city": "Gaziantep",
+        "chef": "Murat Deniz Temel",
+        "instagram": "alafgaziantep",
+        "categories": [CATEGORY_LOKANTA, CATEGORY_FINE_DINING]
+    },
+    {
+        "name": "Sakhalin İstanbul",
+        "toques": 2,
+        "award": "Uluslararası Marka Ödülü",
+        "city": "Istanbul",
+        "chef": "Vladimir Mukhin",
+        "instagram": "sakhalinistanbul",
+        "categories": [CATEGORY_FINE_DINING]
+    },
+    # Brunch ödülleri
+    {
+        "name": "Swissôtel The Bosphorus",
+        "toques": 2,
+        "award": "En İyi Brunch",
+        "city": "Istanbul",
+        "chef": "Soner Kesgin",
+        "instagram": "swissotelthebosphorus",
+        "categories": [CATEGORY_BRUNCH, CATEGORY_FINE_DINING]
+    },
+    {
+        "name": "Four Seasons Bosphorus",
+        "toques": 2,
+        "award": "En İyi Brunch",
+        "city": "Istanbul",
+        "chef": "Görkem Özkan",
+        "instagram": "fsbosphorus",
+        "categories": [CATEGORY_BRUNCH, CATEGORY_FINE_DINING]
+    },
+    {
+        "name": "Çırağan Palace Kempinski",
+        "toques": 2,
+        "award": "En İyi Brunch & En İyi Banket",
+        "city": "Istanbul",
+        "chef": "Davut Kutlugün",
+        "instagram": "caborestaurants",
+        "categories": [CATEGORY_BRUNCH, CATEGORY_FINE_DINING]
+    },
+    {
+        "name": "Hodan",
+        "toques": 2,
+        "award": "En İyi Brunch",
+        "city": "Istanbul",
+        "chef": "Çiğdem Seferoğlu",
+        "instagram": "hodanistanbul",
+        "categories": [CATEGORY_BRUNCH, CATEGORY_KAHVALTI]
+    },
+    {
+        "name": "Çiy Restoran",
+        "toques": 2,
+        "award": "En İyi Brunch",
+        "city": "Izmir",
+        "chef": "Damla Uğurtaş",
+        "instagram": "ciyrestoran",
+        "categories": [CATEGORY_BRUNCH, CATEGORY_KAHVALTI]
+    },
+    {
+        "name": "Lacivert Restoran",
+        "toques": 2,
+        "award": "En İyi Brunch",
+        "city": "Istanbul",
+        "chef": "Aslı Günver",
+        "instagram": "lacivertrestaurant",
+        "categories": [CATEGORY_BRUNCH, CATEGORY_BALIKCI]
+    },
+    {
+        "name": "Divan Kuruçeşme",
+        "toques": 2,
+        "award": "En İyi Brunch",
+        "city": "Istanbul",
+        "chef": "Serpil Toptaş",
+        "instagram": "divankurucesme",
+        "categories": [CATEGORY_BRUNCH]
+    },
+    {
+        "name": "Beca Mutfak",
+        "toques": 2,
+        "award": "En İyi Brunch",
+        "city": "Istanbul",
+        "chef": "Cüneyt Açık",
+        "instagram": "becamutfak",
+        "categories": [CATEGORY_BRUNCH, CATEGORY_KAHVALTI]
+    },
+    # Yüzyıllık İşletmeler (Onur Ödülü)
+    {
+        "name": "Hacı Abdullah Lokantası",
+        "toques": 2,
+        "award": "Yüzyıllık İşletme (Onur Ödülü)",
+        "city": "Istanbul",
+        "chef": "Abdullah Korun",
+        "instagram": "haciabdullah",
+        "categories": [CATEGORY_LOKANTA]
+    },
+    {
+        "name": "Şekerci Cafer Erol",
+        "toques": 2,
+        "award": "Yüzyıllık İşletme (Onur Ödülü)",
+        "city": "Istanbul",
+        "chef": "Hakan Erol",
+        "instagram": "sekercicafererol",
+        "categories": [CATEGORY_TATLICI]
+    },
+    {
+        "name": "Beyaz Fırın",
+        "toques": 2,
+        "award": "Yüzyıllık İşletme (Onur Ödülü)",
+        "city": "Istanbul",
+        "chef": "Nathalie Stoyanof",
+        "instagram": "beyazfirin",
+        "categories": [CATEGORY_TATLICI, CATEGORY_KAHVALTI]
+    },
+    {
+        "name": "Yanyalı Fehmi",
+        "toques": 2,
+        "award": "Yüzyıllık İşletme (Onur Ödülü)",
+        "city": "Istanbul",
+        "chef": None,
+        "instagram": "yanaylifehmi",
+        "categories": [CATEGORY_LOKANTA]
+    },
+    {
+        "name": "İmam Çağdaş",
+        "toques": 2,
+        "award": "Yüzyıllık İşletme (Onur Ödülü)",
+        "city": "Gaziantep",
+        "chef": "Burhan Çağdaş",
+        "instagram": "imamcagdas",
+        "categories": [CATEGORY_LOKANTA, CATEGORY_TATLICI]
+    },
+    # Lezzet Elçileri
+    {
+        "name": "Nazende",
+        "toques": 2,
+        "award": "Yılın Lezzet Elçisi",
+        "city": "Istanbul",
+        "chef": "Uluç Sakarya",
+        "instagram": "nazenderestaurant",
+        "categories": [CATEGORY_LOKANTA]
+    },
+    {
+        "name": "Yalova Restaurant",
+        "toques": 2,
+        "award": "Yılın Lezzet Elçisi",
+        "city": "Çanakkale",
+        "chef": "Ertuğrul Sürgit",
+        "instagram": "yalovarestaurant",
+        "categories": [CATEGORY_BALIKCI, CATEGORY_LOKANTA]
+    },
+    # Bar & Miksoloji
+    {
+        "name": "Frankie",
+        "toques": 2,
+        "award": "En İyi Bar",
+        "city": "Istanbul",
+        "chef": "Hakan Özkul",
+        "instagram": "frankieistanbul",
+        "categories": [CATEGORY_BAR]
+    },
+    {
+        "name": "Maçakızı",
+        "toques": 2,
+        "award": "En İyi Sommelier",
+        "city": "Muğla",
+        "chef": "Vincent Lopresto",
+        "instagram": "macakizi",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_BAR]
+    },
+    {
+        "name": "Fahri Konsolos",
+        "toques": 2,
+        "award": "En İyi Miksoloji Mekanı",
+        "city": "Istanbul",
+        "chef": "Emir Ali Enç",
+        "instagram": "fahrikonsolos",
+        "categories": [CATEGORY_BAR]
+    },
+    # Resort & Otel
+    {
+        "name": "Hillside Beach Club",
+        "toques": 2,
+        "award": "En İyi Resort Oteli",
+        "city": "Muğla",
+        "chef": None,
+        "instagram": "hillsidebeachclub",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_BRUNCH]
+    },
+    {
+        "name": "Museum Hotel",
+        "toques": 2,
+        "award": "En İyi Butik Otel",
+        "city": "Nevşehir",
+        "chef": "Tolga Tosun",
+        "instagram": "museumhotelcappadocia",
+        "categories": [CATEGORY_FINE_DINING, CATEGORY_BRUNCH]
+    },
+    {
+        "name": "Akra Hotels",
+        "toques": 2,
+        "award": "En İyi Şehir Oteli F&B",
+        "city": "Antalya",
+        "chef": "Gökhan Polat",
+        "instagram": "akrahotels",
+        "categories": [CATEGORY_FINE_DINING]
+    },
+    {
+        "name": "Maxx Royal Resorts",
+        "toques": 2,
+        "award": "En İyi Resort F&B",
+        "city": "Antalya",
+        "chef": "Naoki Katori",
+        "instagram": "maxxroyalresorts",
+        "categories": [CATEGORY_FINE_DINING]
+    },
 
     # ============ 1 TOQUE - İYİ ============
     {
         "name": "Tarihi Sultanahmet Köftecisi",
         "toques": 1,
-        "award": "En İyi Sokak Lezzeti",
+        "award": None,
         "city": "Istanbul",
         "chef": None,
         "instagram": "sultanahmetkoftecisi1920",
@@ -279,6 +619,35 @@ GAULT_MILLAU_RESTAURANTS_LIST: List[Dict] = [
         "chef": None,
         "instagram": "streetbitesizmir",
         "categories": [CATEGORY_SOKAK]
+    },
+    # Sokak Lezzetleri Ödülleri
+    {
+        "name": "Basta! Street Food Bar",
+        "toques": 1,
+        "award": "En İyi Sokak Lezzeti",
+        "city": "Istanbul",
+        "chef": "Derin Arıbaş",
+        "instagram": "bastastreetfood",
+        "categories": [CATEGORY_SOKAK]
+    },
+    {
+        "name": "Kokoreççi Asım Usta",
+        "toques": 1,
+        "award": "En İyi Sokak Lezzeti",
+        "city": "Istanbul",
+        "chef": "Cihan Yılmaz",
+        "instagram": "kokorecciasimusta",
+        "categories": [CATEGORY_SOKAK]
+    },
+    # Patisserie
+    {
+        "name": "Five O'Clock",
+        "toques": 1,
+        "award": "En İyi Patisserie Mekanı",
+        "city": "Istanbul",
+        "chef": "Sinem Ekşioğlu",
+        "instagram": "fiveoclockpastry",
+        "categories": [CATEGORY_TATLICI, CATEGORY_KAHVALTI]
     },
 ]
 
