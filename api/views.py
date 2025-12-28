@@ -2785,6 +2785,7 @@ def generate_bar_venues(location, filters, exclude_ids):
     import os
 
     google_api_key = os.environ.get('GOOGLE_MAPS_API_KEY')
+    gmaps = get_gmaps_client()
 
     city = location['city']
     districts = location.get('districts', [])
@@ -3135,6 +3136,7 @@ def generate_street_food_places(location, filters, exclude_ids):
     import requests
     import re
 
+    gmaps = get_gmaps_client()
     city = location['city']
     districts = location.get('districts', [])
     neighborhoods = location.get('neighborhoods', [])
@@ -3568,6 +3570,7 @@ def generate_party_venues(location, filters, exclude_ids):
     import requests
     import re
 
+    gmaps = get_gmaps_client()
     city = location['city']
     districts = location.get('districts', [])
     neighborhoods = location.get('neighborhoods', [])
