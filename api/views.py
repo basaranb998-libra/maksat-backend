@@ -1615,6 +1615,10 @@ Her mekan için analiz yap ve JSON döndür:
     "kidFriendly": true | false | null,
     "vegetarianOptions": true | false | null,
     "alcoholServed": true | false | null,
+    "hasDelivery": true | false | null,
+    "hasTakeout": true | false | null,
+    "servesBreakfast": true | false | null,
+    "servesBrunch": true | false | null,
     "serviceSpeed": "Hızlı" | "Normal" | "Yavaş" | null,
     "priceFeeling": "Fiyatına Değer" | "Biraz Pahalı" | "Uygun" | null,
     "mustTry": "Yorumlarda öne çıkan yemek/içecek" | null,
@@ -5249,8 +5253,36 @@ def generate_venues(request):
                     if top_reviews:
                         reviews_text = f" | Yorumlar: {' /// '.join(top_reviews)}"
 
+                # Google Places API food services bilgisini formatla
+                food_services_text = ""
+                fs = p.get('food_services', {})
+                if fs:
+                    fs_items = []
+                    if fs.get('servesBeer'):
+                        fs_items.append("Bira:✓")
+                    if fs.get('servesWine'):
+                        fs_items.append("Şarap:✓")
+                    if fs.get('servesVegetarianFood'):
+                        fs_items.append("Vejetaryen:✓")
+                    if fs.get('servesBreakfast'):
+                        fs_items.append("Kahvaltı:✓")
+                    if fs.get('servesBrunch'):
+                        fs_items.append("Brunch:✓")
+                    if fs.get('servesLunch'):
+                        fs_items.append("Öğle:✓")
+                    if fs.get('servesDinner'):
+                        fs_items.append("Akşam:✓")
+                    if fs.get('reservable'):
+                        fs_items.append("Rezervasyon:✓")
+                    if fs.get('takeout'):
+                        fs_items.append("Paket:✓")
+                    if fs.get('delivery'):
+                        fs_items.append("Teslimat:✓")
+                    if fs_items:
+                        food_services_text = f" | Google Servisler: {' '.join(fs_items)}"
+
                 places_list_items.append(
-                    f"{i+1}. {p['name']} | Tip: {', '.join(p['types'][:2])} | Rating: {p.get('rating', 'N/A')}{reviews_text}"
+                    f"{i+1}. {p['name']} | Tip: {', '.join(p['types'][:2])} | Rating: {p.get('rating', 'N/A')}{food_services_text}{reviews_text}"
                 )
             places_list = "\n".join(places_list_items)
 
@@ -5262,7 +5294,8 @@ def generate_venues(request):
                 category_instruction = """
 ÖNEMLİ UYARI - BALIKÇI KATEGORİSİ ALKOL FİLTRESİ:
 Kullanıcı ALKOLLÜ balık restoranı istiyor. Aşağıdaki mekanları DİKKATLİCE değerlendir:
-- Sadece gerçekten alkol servisi yapan, lisanslı balık restoranlarını dahil et
+- "Google Servisler:" bölümünde "Bira:✓" veya "Şarap:✓" varsa → KABUL ET (alkol servisi doğrulanmış)
+- Google verisi yoksa yorumlara bak: "rakı", "şarap", "bira", "kokteyl" → alkol var demektir
 - Sade balık lokantaları, balık evi, balıkçı dükkanı gibi alkol servisi OLMAYAN yerleri REDDET (isRelevant: false)
 - Rakı/şarap ile balık yenebilecek kaliteli restoranları tercih et
 - "Vedat'ın Balık Evi", "Çarşı Balık", "Girne Balık Evi" gibi sade balık lokantaları genellikle ALKOLSÜZ'dür, dikkat et!
@@ -5329,9 +5362,29 @@ KESINLIKLE REDDEDİLECEK MEKANLAR (isRelevant: false):
 ❌ Adana Sofrası, Kebapçı Mahmut → REDDET (isminde "Ocakbaşı" yok)
 """
 
+            # Alkol filtresi için genel talimat ekle (tüm kategoriler için)
+            alcohol_instruction = ""
+            if 'ALKOL: Alcoholic' in preferences_text:
+                alcohol_instruction = """
+ALKOL FİLTRESİ TALİMATI (Kullanıcı ALKOLLÜ mekan istiyor):
+- "Google Servisler:" bölümünde "Bira:✓" veya "Şarap:✓" varsa → kesinlikle alcoholServed: true yaz
+- Google verisi yoksa yorumlarda "rakı", "bira", "şarap", "kokteyl" geçiyorsa → alcoholServed: true
+- Kahveci, pastane, tatlıcı, fast food gibi alkol servisi olmayan mekanlar için isRelevant: false yaz
+"""
+            elif 'ALKOL: Non-Alcoholic' in preferences_text:
+                alcohol_instruction = """
+ALKOLSÜZ FİLTRE TALİMATI (Kullanıcı ALKOLSÜZ mekan istiyor):
+- "Google Servisler:" bölümünde "Bira:✓" veya "Şarap:✓" varsa → bu mekan ALKOLLÜ, dikkatli ol
+- Bar, pub, meyhane, gece kulübü gibi alkol odaklı mekanlar için isRelevant: false yaz
+- Kafe, kahveci, pastane, aile restoranı gibi alkolsüz mekanları tercih et
+"""
+
+            # category_instruction ve alcohol_instruction birleştir
+            full_instruction = category_instruction + alcohol_instruction
+
             batch_prompt = f"""Kategori: {category['name']}
 Kullanıcı Tercihleri: {preferences_text}
-{category_instruction}
+{full_instruction}
 
 Mekanlar ve Yorumları:
 {places_list}
@@ -5365,6 +5418,10 @@ Her mekan için analiz yap ve JSON döndür:
     "kidFriendly": true | false | null,
     "vegetarianOptions": true | false | null,
     "alcoholServed": true | false | null,
+    "hasDelivery": true | false | null,
+    "hasTakeout": true | false | null,
+    "servesBreakfast": true | false | null,
+    "servesBrunch": true | false | null,
     "serviceSpeed": "Hızlı" | "Normal" | "Yavaş" | null,
     "priceFeeling": "Fiyatına Değer" | "Biraz Pahalı" | "Uygun" | null,
     "mustTry": "Yorumlarda öne çıkan yemek/içecek" | null,
@@ -5393,20 +5450,26 @@ Context Skorlama Kuralları:
 - breakfast_brunch: Kahvaltı/brunch için uygunluk.
 - after_work: İş çıkışı için uygun, rahatlatıcı.
 
-practicalInfo Kuralları (YORUMLARDAN ÇIKAR):
-- reservationNeeded: "Rezervasyon şart", "çok kalabalık", "yer bulmak zor" → "Şart". "Rezervasyon tavsiye" → "Tavsiye Edilir"
+practicalInfo Kuralları (GOOGLE SERVİSLERİ + YORUMLAR):
+ÖNEMLİ: "Google Servisler:" bölümünde yer alan bilgiler Google Places API'den geliyor ve doğrulanmış bilgidir. Bu bilgileri öncelikli kullan!
+
+- reservationNeeded: Google'da "Rezervasyon:✓" varsa "Tavsiye Edilir". Yorumlarda "şart", "çok kalabalık" → "Şart"
 - crowdLevel: "Sakin", "sessiz", "rahat" → "Sakin". "Kalabalık", "gürültülü", "dolu" → "Kalabalık"
 - waitTime: "Bekledik", "sıra", "kuyruk" → süreyi tahmin et. Hiç bahsedilmemişse null
 - parking: "Otopark", "park yeri" → "Otopark var". "Park zor", "park yok" → "Zor". "Park kolay" → "Kolay". Hiç bahsedilmemişse null
 - hasValet: "Vale", "valet" → true. Yoksa null
 - outdoorSeating: "Bahçe", "dış mekan", "teras" → true
 - kidFriendly: "Çocuklu", "aile", "çocuk menüsü" → true. "Bar", "gece kulübü" → false
-- vegetarianOptions: "Vejetaryen", "vegan", "sebze" → true
-- alcoholServed: "Rakı", "şarap", "bira", "kokteyl" → true
+- vegetarianOptions: Google'da "Vejetaryen:✓" varsa KESİNLİKLE true yaz! Yoksa yorumlardan çıkar
+- alcoholServed: Google'da "Bira:✓" veya "Şarap:✓" varsa KESİNLİKLE true yaz! Yoksa yorumlardan "rakı", "bira", "şarap", "kokteyl" gibi kelimeler varsa true
 - serviceSpeed: "Hızlı", "geç geldi", "bekledik" → ilgili değeri seç
 - priceFeeling: "Pahalı", "ucuz", "fiyatına değer" → seç
 - mustTry: Yorumlarda en çok övülen yemek/içecek (varsa)
 - headsUp: Önemli uyarılar (nakit, kredi kartı, köpek yasak, vb.)
+- hasDelivery: Google'da "Teslimat:✓" varsa true
+- hasTakeout: Google'da "Paket:✓" varsa true
+- servesBreakfast: Google'da "Kahvaltı:✓" varsa true
+- servesBrunch: Google'da "Brunch:✓" varsa true
 
 atmosphereSummary Kuralları:
 - noiseLevel: "Sessiz" (fısıltıyla konuşulur), "Sohbet Dostu" (rahat sohbet), "Canlı" (biraz ses), "Gürültülü" (zor duyulur)
@@ -5423,7 +5486,7 @@ atmosphereSummary Kuralları:
 - Skor 50'nin altındaysa o context için uygun değil demektir
 - Yorumları dikkate al (atmosfer, kalabalık, servis hakkında ipuçları içerir)
 - vibeTags Türkçe ve # ile başlamalı
-- practicalInfo bilgileri YALNIZCA yorumlardan çıkarılmalı, yoksa null yaz
+- practicalInfo: ÖNCELİKLE "Google Servisler:" bilgilerini kullan (alcoholServed, vegetarianOptions için). Yoksa yorumlardan çıkar, hiçbiri yoksa null yaz
 - instagramUrl: Mekanın resmi Instagram hesabını bul. Türkiye'deki mekanların Instagram'ı genellikle mekan_ismi, mekanadi, mekanismişehir formatındadır. Örnek: "Atakent Meyhanesi" → "https://instagram.com/atakent_meyhanesi". Bilinen popüler mekanların Instagram'ını ver. Emin olmadığın veya çok küçük/yerel mekanlar için null yaz.
 
 SADECE JSON ARRAY döndür, başka açıklama yazma."""
