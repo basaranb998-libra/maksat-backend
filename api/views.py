@@ -434,6 +434,9 @@ def get_gm_venues_for_category(category_id: str, category_name: str, city: str, 
                 venue['gaultMillauToques'] = gm_venue.toques
                 if gm_venue.award:
                     venue['gaultMillauAward'] = gm_venue.award
+                # googleMapsUrl yoksa ekle
+                if not venue.get('googleMapsUrl') and gm_venue.place_id:
+                    venue['googleMapsUrl'] = f"https://www.google.com/maps/place/?q=place_id:{gm_venue.place_id}"
                 venues_data.append(venue)
 
         if venues_data:
@@ -553,6 +556,7 @@ def get_gm_venues_for_category(category_id: str, category_name: str, city: str, 
                         'priceRange': price_map.get(price_level, '$$'),
                         'website': place_details.get('website'),
                         'phone': place_details.get('formatted_phone_number'),
+                        'googleMapsUrl': f"https://www.google.com/maps/place/?q=place_id:{place_id}",
                         'gaultMillauToques': restaurant.get('toques', 2),
                         'gaultMillauAward': restaurant.get('award'),
                         'instagramUrl': f"https://instagram.com/{restaurant.get('instagram')}" if restaurant.get('instagram') else None,
