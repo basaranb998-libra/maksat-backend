@@ -4536,7 +4536,7 @@ def generate_venues(request):
                 'Kafa Dinleme': 'lounge bar quiet restaurant',
                 'Odaklanma': 'bar restaurant lounge',
                 'Aile Yemeği': 'restaurant bar casual dining',
-                '3. Nesil Kahveci': 'specialty coffee third wave coffee roastery cafe kahve kavurma butik kahveci artisan coffee',
+                '3. Nesil Kahveci': 'butik kahveci 3. nesil kahve specialty coffee roastery kahve kavurucu',
                 'Konserler': 'live music venue concert hall bar',
                 'Sahne Sanatları': 'theater venue performance hall',
                 'Yerel Festivaller': 'festival event venue',
@@ -4566,7 +4566,7 @@ def generate_venues(request):
                 'Kafa Dinleme': 'quiet cafe tea house peaceful spot',
                 'Odaklanma': 'coworking space cafe library quiet study',
                 'Aile Yemeği': 'family restaurant cafe casual dining',
-                '3. Nesil Kahveci': 'specialty coffee third wave coffee roastery kahve kavurma butik kahveci artisan coffee',
+                '3. Nesil Kahveci': 'butik kahveci 3. nesil kahve specialty coffee roastery kahve kavurucu',
                 'Konserler': 'concert hall music venue',
                 'Sahne Sanatları': 'theater venue performance hall',
                 'Yerel Festivaller': 'festival event venue',
@@ -4594,7 +4594,7 @@ def generate_venues(request):
                 'Kafa Dinleme': 'quiet cafe lounge peaceful spot relaxing',
                 'Odaklanma': 'coworking space cafe library quiet study',
                 'Aile Yemeği': 'family restaurant casual dining kid friendly',
-                '3. Nesil Kahveci': 'specialty coffee third wave coffee roastery kahve kavurma butik kahveci artisan coffee cafe',
+                '3. Nesil Kahveci': 'butik kahveci 3. nesil kahve specialty coffee roastery kahve kavurucu',
                 'Konserler': 'live music venue concert hall',
                 'Sahne Sanatları': 'theater venue stand up comedy performance',
                 'Yerel Festivaller': 'festival event food festival',
@@ -4944,9 +4944,8 @@ def generate_venues(request):
                 'İlk Buluşma', 'Fine Dining', 'Özel Gün', 'İş Yemeği', 'Öğlen Yemeği',
                 'Esnaf Lokantası', 'Balıkçı', 'Meyhane', 'Muhabbet', 'Brunch',
                 'İş Çıkışı Bira & Kokteyl', 'Sokak Lezzeti',
-                'Burger & Fast', 'Pizzacı'
+                'Burger & Fast', 'Pizzacı', '3. Nesil Kahveci'
             ]
-            # NOT: 3. Nesil Kahveci bu listede YOK - butik kahveciler için sıkı filtreler uygulanmaz
 
             if category_name in restaurant_categories:
                 # 1. Puan filtresi - 4.0 ve üstü kabul
