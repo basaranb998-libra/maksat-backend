@@ -1176,12 +1176,7 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
         if len(all_venues_for_gemini) < 10:
             remaining_slots = 10 - len(all_venues_for_gemini)
 
-            url = "https://places.googleapis.com/v1/places:searchText"
-            headers = {
-                "Content-Type": "application/json",
-                "X-Goog-Api-Key": settings.GOOGLE_MAPS_API_KEY,
-                "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours,places.businessStatus"
-            }
+            url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 
             query_templates = [
                 "fine dining restaurant upscale gourmet in {loc}, Turkey",
@@ -1197,23 +1192,23 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
                         break
 
                     query = template.format(loc=search_loc)
-                    payload = {
-                        "textQuery": query,
-                        "languageCode": "tr",
-                        "maxResultCount": 6
+                    params = {
+                        "query": query,
+                        "language": "tr",
+                        "key": settings.GOOGLE_MAPS_API_KEY
                     }
                     print(f"🔍 Fine dining araması: {query}", file=sys.stderr, flush=True)
 
                     try:
-                        response = requests.post(url, json=payload, headers=headers)
+                        response = requests.get(url, params=params)
                         if response.status_code == 200:
                             places_data = response.json()
-                            places_list = places_data.get('places', [])
+                            places_list = places_data.get('results', [])
 
                             for place in places_list:
-                                place_name = place.get('displayName', {}).get('text', '')
+                                place_name = place.get('name', '')
                                 place_name_lower = place_name.lower()
-                                place_address = place.get('formattedAddress', '')
+                                place_address = place.get('formatted_address', '')
                                 place_rating = place.get('rating', 0)
                                 place_types = place.get('types', [])
 
@@ -1264,34 +1259,25 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
             all_places.sort(key=lambda x: x.get('rating', 0), reverse=True)
 
             for idx, place in enumerate(all_places[:remaining_slots]):
-                place_name = place.get('displayName', {}).get('text', '')
-                place_address = place.get('formattedAddress', '')
+                place_name = place.get('name', '')
+                place_address = place.get('formatted_address', '')
                 place_rating = place.get('rating', 0)
 
                 photo_url = 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800'
                 if place.get('photos'):
-                    photo_name = place['photos'][0].get('name', '')
-                    if photo_name:
-                        photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?maxHeightPx=800&maxWidthPx=800&key={settings.GOOGLE_MAPS_API_KEY}"
+                    photo_ref = place['photos'][0].get('photo_reference', '')
+                    if photo_ref:
+                        photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference={photo_ref}&key={settings.GOOGLE_MAPS_API_KEY}"
 
                 michelin_info = is_michelin_restaurant(place_name)
 
-                # Google reviews al
+                # Legacy API'de reviews textsearch'ta gelmez
                 google_reviews = []
-                raw_reviews = place.get('reviews', [])
-                for review in raw_reviews[:5]:
-                    google_reviews.append({
-                        'authorName': review.get('authorAttribution', {}).get('displayName', 'Anonim'),
-                        'rating': review.get('rating', 5),
-                        'text': review.get('text', {}).get('text', ''),
-                        'relativeTime': review.get('relativePublishTimeDescription', ''),
-                        'profilePhotoUrl': review.get('authorAttribution', {}).get('photoUri', '')
-                    })
 
-                opening_hours = place.get('currentOpeningHours', {})
+                opening_hours = place.get('opening_hours', {})
 
                 venue_data = {
-                    'id': f"fd_{idx+1}",
+                    'id': place.get('place_id', f"fd_{idx+1}"),
                     'name': place_name,
                     'base_description': f"Fine dining deneyimi sunan şık ve kaliteli bir restoran.",
                     'imageUrl': photo_url,
@@ -1300,15 +1286,15 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
                     'address': place_address,
                     'priceRange': '$$$',
                     'googleRating': place_rating,
-                    'googleReviewCount': place.get('userRatingCount', 0),
+                    'googleReviewCount': place.get('user_ratings_total', 0),
                     'matchScore': 85,
                     'noiseLevel': 35,
                     'googleMapsUrl': f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(place_name + ' ' + city)}",
                     'isMichelinStarred': michelin_info is not None,
-                    'weeklyHours': opening_hours.get('weekdayDescriptions', []),
-                    'isOpenNow': opening_hours.get('openNow', None),
-                    'website': place.get('websiteUri', ''),
-                    'phoneNumber': place.get('internationalPhoneNumber', ''),
+                    'weeklyHours': opening_hours.get('weekday_text', []),
+                    'isOpenNow': opening_hours.get('open_now', None),
+                    'website': '',  # Legacy API textsearch'ta website gelmez
+                    'phoneNumber': '',  # Legacy API textsearch'ta telefon gelmez
                     'google_reviews': google_reviews,
                     'googleReviews': google_reviews
                 }
@@ -2635,39 +2621,33 @@ def generate_bar_venues(location, filters, exclude_ids):
             search_query = f"{query_term} {search_location}"
             print(f"🔍 Bar Query: {search_query}", file=sys.stderr, flush=True)
 
-            # Google Places API Text Search
-            api_url = "https://places.googleapis.com/v1/places:searchText"
-            headers = {
-                'Content-Type': 'application/json',
-                'X-Goog-Api-Key': google_api_key,
-                'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.priceLevel,places.types,places.photos,places.websiteUri,places.googleMapsUri,places.currentOpeningHours,places.reviews'
-            }
-
-            body = {
-                'textQuery': search_query,
-                'languageCode': 'tr',
-                'maxResultCount': 5  # Her sorgu için 5 sonuç
+            # Google Places API Text Search (Legacy)
+            api_url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+            params = {
+                'query': search_query,
+                'language': 'tr',
+                'key': google_api_key
             }
 
             try:
-                response = requests.post(api_url, headers=headers, json=body, timeout=10)
+                response = requests.get(api_url, params=params, timeout=10)
                 if response.status_code != 200:
                     print(f"⚠️ Bar API error for {bar_type}: {response.status_code}", file=sys.stderr, flush=True)
                     continue
 
                 data = response.json()
-                places = data.get('places', [])
+                places = data.get('results', [])
 
                 for place in places:
-                    place_id = place.get('id', '')
+                    place_id = place.get('place_id', '')
                     if place_id in seen_place_ids:
                         continue
 
                     # Temel filtreler
                     place_types = place.get('types', [])
-                    place_name = place.get('displayName', {}).get('text', '')
+                    place_name = place.get('name', '')
                     place_rating = place.get('rating', 0)
-                    place_review_count = place.get('userRatingCount', 0)
+                    place_review_count = place.get('user_ratings_total', 0)
 
                     # Meyhane, ocakbaşı, kebap gibi yerleri filtrele
                     excluded_keywords = ['meyhane', 'ocakbaşı', 'kebap', 'kebapçı', 'köfte', 'balık', 'fasıl', 'türkü', 'lokanta', 'restoran', 'restaurant']
@@ -2686,31 +2666,17 @@ def generate_bar_venues(location, filters, exclude_ids):
                     photos = place.get('photos', [])
                     photo_url = None
                     if photos:
-                        photo_name = photos[0].get('name', '')
-                        if photo_name:
-                            photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?maxHeightPx=800&maxWidthPx=800&key={google_api_key}"
+                        photo_ref = photos[0].get('photo_reference', '')
+                        if photo_ref:
+                            photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference={photo_ref}&key={google_api_key}"
 
-                    # Price level
-                    price_level = place.get('priceLevel', 'PRICE_LEVEL_MODERATE')
-                    price_map = {
-                        'PRICE_LEVEL_FREE': '₺',
-                        'PRICE_LEVEL_INEXPENSIVE': '₺₺',
-                        'PRICE_LEVEL_MODERATE': '₺₺₺',
-                        'PRICE_LEVEL_EXPENSIVE': '₺₺₺₺',
-                        'PRICE_LEVEL_VERY_EXPENSIVE': '₺₺₺₺₺'
-                    }
+                    # Price level (Legacy API: 0-4 integer)
+                    price_level = place.get('price_level', 2)
+                    price_map = {0: '₺', 1: '₺₺', 2: '₺₺₺', 3: '₺₺₺₺', 4: '₺₺₺₺₺'}
                     price_range = price_map.get(price_level, '₺₺₺')
 
-                    # Google yorumları
-                    raw_reviews = place.get('reviews', [])
+                    # Legacy API'de reviews textsearch'ta gelmez
                     google_reviews = []
-                    for r in raw_reviews[:5]:
-                        google_reviews.append({
-                            'text': r.get('text', {}).get('text', ''),
-                            'rating': r.get('rating', 5),
-                            'author': r.get('authorAttribution', {}).get('displayName', 'Anonim'),
-                            'time': r.get('relativePublishTimeDescription', '')
-                        })
 
                     # Vibe tags
                     vibe_tags = ['#İşÇıkışı', f'#{bar_type.replace(" ", "").replace("/", "")}', '#AfterWork']
@@ -2723,17 +2689,17 @@ def generate_bar_venues(location, filters, exclude_ids):
                         'category': 'İş Çıkışı Bira & Kokteyl',
                         'barType': bar_type,
                         'vibeTags': vibe_tags,
-                        'address': place.get('formattedAddress', ''),
+                        'address': place.get('formatted_address', ''),
                         'priceRange': price_range,
                         'googleRating': place_rating,
                         'googleReviewCount': place_review_count,
                         'matchScore': min(95, int(place_rating * 20 + min(place_review_count / 50, 10))),
                         'noiseLevel': 65,
-                        'googleMapsUrl': place.get('googleMapsUri', ''),
+                        'googleMapsUrl': f"https://www.google.com/maps/place/?q=place_id:{place_id}",
                         'googleReviews': google_reviews,
                         'google_reviews': google_reviews,
-                        'website': place.get('websiteUri', ''),
-                        'hours': place.get('currentOpeningHours', {}).get('weekdayDescriptions', []),
+                        'website': '',
+                        'hours': place.get('opening_hours', {}).get('weekday_text', []),
                     }
                     all_venues.append(venue)
                     print(f"✅ Bar Found: {place_name} ({bar_type}) - {place_rating}⭐", file=sys.stderr, flush=True)
@@ -3013,36 +2979,30 @@ def generate_street_food_places(location, filters, exclude_ids):
     try:
         for query_term, food_type in street_food_queries:
             try:
-                url = "https://places.googleapis.com/v1/places:searchText"
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-Goog-Api-Key": settings.GOOGLE_MAPS_API_KEY,
-                    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours,places.businessStatus"
-                }
-
-                payload = {
-                    "textQuery": f"{query_term} in {search_location}, Turkey",
-                    "languageCode": "tr",
-                    "maxResultCount": 5  # Her kategori için 5 sonuç
+                url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+                params = {
+                    "query": f"{query_term} in {search_location}, Turkey",
+                    "language": "tr",
+                    "key": settings.GOOGLE_MAPS_API_KEY
                 }
 
                 print(f"🔍 Sorgu: {query_term} in {search_location}", file=sys.stderr, flush=True)
 
-                response = requests.post(url, json=payload, headers=headers)
+                response = requests.get(url, params=params)
 
                 if response.status_code != 200:
                     print(f"⚠️ API hatası ({query_term}): {response.status_code}", file=sys.stderr, flush=True)
                     continue
 
                 places_data = response.json()
-                places = places_data.get('places', [])
+                places = places_data.get('results', [])
 
                 for place in places:
-                    place_id = place.get('id', '')
-                    place_name = place.get('displayName', {}).get('text', '')
-                    place_address = place.get('formattedAddress', '')
+                    place_id = place.get('place_id', '')
+                    place_name = place.get('name', '')
+                    place_address = place.get('formatted_address', '')
                     place_rating = place.get('rating', 0)
-                    place_review_count = place.get('userRatingCount', 0)
+                    place_review_count = place.get('user_ratings_total', 0)
                     place_types = place.get('types', [])
 
                     # Daha önce eklendiyse atla
@@ -3085,45 +3045,30 @@ def generate_street_food_places(location, filters, exclude_ids):
                         print(f"❌ TEKEL REJECT - {place_name}", file=sys.stderr, flush=True)
                         continue
 
-                    # Fotoğraf URL'si
+                    # Fotoğraf URL'si (Legacy API)
                     photo_url = None
                     if place.get('photos') and len(place['photos']) > 0:
-                        photo_name = place['photos'][0].get('name', '')
-                        if photo_name:
-                            photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?key={settings.GOOGLE_MAPS_API_KEY}&maxWidthPx=800"
+                        photo_ref = place['photos'][0].get('photo_reference', '')
+                        if photo_ref:
+                            photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference={photo_ref}&key={settings.GOOGLE_MAPS_API_KEY}"
 
                     # Google Maps URL
                     maps_query = urllib.parse.quote(f"{place_name} {place_address}")
                     google_maps_url = f"https://www.google.com/maps/search/?api=1&query={maps_query}"
 
-                    # Fiyat aralığı
-                    price_level_str = place.get('priceLevel', 'PRICE_LEVEL_INEXPENSIVE')
-                    price_level_map = {
-                        'PRICE_LEVEL_FREE': 1, 'PRICE_LEVEL_INEXPENSIVE': 1,
-                        'PRICE_LEVEL_MODERATE': 2, 'PRICE_LEVEL_EXPENSIVE': 3,
-                        'PRICE_LEVEL_VERY_EXPENSIVE': 4
-                    }
-                    price_level = price_level_map.get(price_level_str, 1)
-                    price_map = {1: '$', 2: '$$', 3: '$$$', 4: '$$$$'}
+                    # Fiyat aralığı (Legacy API: 0-4 integer)
+                    price_level = place.get('price_level', 1)
+                    price_map = {0: '$', 1: '$', 2: '$$', 3: '$$$', 4: '$$$$'}
                     price_range = price_map.get(price_level, '$')
 
-                    # Yorumları formatla (googleReviews formatı - frontend ile uyumlu)
+                    # Legacy API'de reviews textsearch'ta gelmez
                     google_reviews = []
-                    raw_reviews = place.get('reviews', [])
-                    for review in raw_reviews[:5]:
-                        google_reviews.append({
-                            'authorName': review.get('authorAttribution', {}).get('displayName', 'Anonim'),
-                            'rating': review.get('rating', 5),
-                            'text': review.get('text', {}).get('text', ''),
-                            'relativeTime': review.get('relativePublishTimeDescription', ''),
-                            'profilePhotoUrl': review.get('authorAttribution', {}).get('photoUri', '')
-                        })
 
                     # Vibe tags
                     vibe_tags = ['#SokakLezzeti', f'#{food_type.replace(" ", "")}', '#Yerel']
 
                     # Çalışma saatleri
-                    opening_hours = place.get('currentOpeningHours', {})
+                    opening_hours = place.get('opening_hours', {})
 
                     venue = {
                         'id': place_id,
@@ -3142,10 +3087,10 @@ def generate_street_food_places(location, filters, exclude_ids):
                         'googleReviews': google_reviews,
                         'google_reviews': google_reviews,  # Gemini için
                         'foodType': food_type,
-                        'weeklyHours': opening_hours.get('weekdayDescriptions', []),
-                        'isOpenNow': opening_hours.get('openNow', None),
-                        'website': place.get('websiteUri', ''),
-                        'phoneNumber': place.get('internationalPhoneNumber', '')
+                        'weeklyHours': opening_hours.get('weekday_text', []),
+                        'isOpenNow': opening_hours.get('open_now', None),
+                        'website': '',
+                        'phoneNumber': ''
                     }
 
                     venues.append(venue)
@@ -3494,36 +3439,30 @@ def generate_party_venues(location, filters, exclude_ids):
     try:
         for query_term, venue_type in party_queries:
             try:
-                url = "https://places.googleapis.com/v1/places:searchText"
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-Goog-Api-Key": settings.GOOGLE_MAPS_API_KEY,
-                    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours,places.businessStatus"
-                }
-
-                payload = {
-                    "textQuery": f"{query_term} in {search_location}, Turkey",
-                    "languageCode": "tr",
-                    "maxResultCount": 10  # Her kategori için 10 sonuç
+                url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+                params = {
+                    "query": f"{query_term} in {search_location}, Turkey",
+                    "language": "tr",
+                    "key": settings.GOOGLE_MAPS_API_KEY
                 }
 
                 print(f"🔍 Sorgu: {query_term} in {search_location}", file=sys.stderr, flush=True)
 
-                response = requests.post(url, json=payload, headers=headers)
+                response = requests.get(url, params=params)
 
                 if response.status_code != 200:
                     print(f"⚠️ API hatası ({query_term}): {response.status_code}", file=sys.stderr, flush=True)
                     continue
 
                 places_data = response.json()
-                places = places_data.get('places', [])
+                places = places_data.get('results', [])
 
                 for place in places:
-                    place_id = place.get('id', '')
-                    place_name = place.get('displayName', {}).get('text', '')
-                    place_address = place.get('formattedAddress', '')
+                    place_id = place.get('place_id', '')
+                    place_name = place.get('name', '')
+                    place_address = place.get('formatted_address', '')
                     place_rating = place.get('rating', 0)
-                    place_review_count = place.get('userRatingCount', 0)
+                    place_review_count = place.get('user_ratings_total', 0)
                     place_types = place.get('types', [])
 
                     # Daha önce eklendiyse atla
@@ -3535,14 +3474,14 @@ def generate_party_venues(location, filters, exclude_ids):
                         print(f"⏭️ EXCLUDE - {place_name}: zaten gösterildi", file=sys.stderr, flush=True)
                         continue
 
-                    # Kalıcı/geçici kapalı mekan kontrolü
-                    business_status = place.get('businessStatus', 'OPERATIONAL')
+                    # Kalıcı/geçici kapalı mekan kontrolü (Legacy API: business_status alanı)
+                    business_status = place.get('business_status', 'OPERATIONAL')
                     if business_status in ['CLOSED_PERMANENTLY', 'CLOSED_TEMPORARILY']:
                         print(f"❌ KAPALI MEKAN REJECT - {place_name}: {business_status}", file=sys.stderr, flush=True)
                         continue
 
-                    # Son 7 aydır yorum gelmemişse kapalı say
-                    raw_reviews = place.get('reviews', [])
+                    # Legacy API'de reviews textsearch'ta gelmez, bu kontrolü atlıyoruz
+                    raw_reviews = []
                     if raw_reviews:
                         from datetime import datetime, timedelta
                         seven_months_ago = datetime.now() - timedelta(days=210)  # 7 ay
@@ -3675,52 +3614,27 @@ def generate_party_venues(location, filters, exclude_ids):
                         print(f"❌ HİZMET FİRMASI REJECT - {place_name}: mekan değil hizmet firması", file=sys.stderr, flush=True)
                         continue
 
-                    # Fotoğraf URL'si
+                    # Fotoğraf URL'si (Legacy API)
                     photo_url = None
                     if place.get('photos') and len(place['photos']) > 0:
-                        photo_name = place['photos'][0].get('name', '')
-                        if photo_name:
-                            photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?key={settings.GOOGLE_MAPS_API_KEY}&maxWidthPx=800"
+                        photo_ref = place['photos'][0].get('photo_reference', '')
+                        if photo_ref:
+                            photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference={photo_ref}&key={settings.GOOGLE_MAPS_API_KEY}"
 
                     # Google Maps URL
                     maps_query = urllib.parse.quote(f"{place_name} {place_address}")
                     google_maps_url = f"https://www.google.com/maps/search/?api=1&query={maps_query}"
 
-                    # Fiyat aralığı
-                    price_level_str = place.get('priceLevel', 'PRICE_LEVEL_MODERATE')
-                    price_level_map = {
-                        'PRICE_LEVEL_FREE': 1, 'PRICE_LEVEL_INEXPENSIVE': 1,
-                        'PRICE_LEVEL_MODERATE': 2, 'PRICE_LEVEL_EXPENSIVE': 3,
-                        'PRICE_LEVEL_VERY_EXPENSIVE': 4
-                    }
-                    price_level = price_level_map.get(price_level_str, 2)
-                    price_map = {1: '$$', 2: '$$', 3: '$$$', 4: '$$$$'}
+                    # Fiyat aralığı (Legacy API: 0-4 integer)
+                    price_level = place.get('price_level', 2)
+                    price_map = {0: '$$', 1: '$$', 2: '$$', 3: '$$$', 4: '$$$$'}
                     price_range = price_map.get(price_level, '$$')
 
-                    # Google Reviews formatla
+                    # Legacy API'de reviews textsearch'ta gelmez
                     google_reviews = []
-                    raw_reviews = place.get('reviews', [])
-                    sorted_reviews = sorted(
-                        raw_reviews,
-                        key=lambda r: r.get('publishTime', ''),
-                        reverse=True
-                    )[:10]
-                    for review in sorted_reviews:
-                        google_reviews.append({
-                            'authorName': review.get('authorAttribution', {}).get('displayName', 'Anonim'),
-                            'rating': review.get('rating', 5),
-                            'text': review.get('text', {}).get('text', ''),
-                            'relativeTime': review.get('relativePublishTimeDescription', ''),
-                            'profilePhotoUrl': review.get('authorAttribution', {}).get('photoUri', ''),
-                            'publishTime': review.get('publishTime', '')
-                        })
 
-                    # Yorumlarda parti/DJ/canlı müzik geçiyor mu kontrol et
-                    party_keywords_in_reviews = ['dj', 'canlı müzik', 'canli muzik', 'live music', 'dans', 'dance',
-                                                  'parti', 'party', 'gece', 'eğlence', 'eglence', 'sahne',
-                                                  'performans', 'konser', 'müzik', 'muzik']
-                    all_review_text = ' '.join([r.get('text', {}).get('text', '').lower() for r in raw_reviews])
-                    party_keyword_matches = sum(1 for kw in party_keywords_in_reviews if kw in all_review_text)
+                    # Legacy API'de yorum olmadığı için bonus 0
+                    party_keyword_matches = 0
 
                     # Bonus puan: Yorumlarda parti keyword'leri varsa
                     party_bonus = min(15, party_keyword_matches * 3)  # Her keyword için +3, max +15
@@ -3738,11 +3652,11 @@ def generate_party_venues(location, filters, exclude_ids):
                     if 'dans' in all_review_text or 'dance' in all_review_text:
                         vibe_tags.append('#Dans')
 
-                    # Çalışma saatleri
-                    opening_hours = place.get('currentOpeningHours', {})
-                    hours_list = opening_hours.get('weekdayDescriptions', [])
+                    # Çalışma saatleri (Legacy API)
+                    opening_hours = place.get('opening_hours', {})
+                    hours_list = opening_hours.get('weekday_text', [])
                     hours_text = hours_list[0] if hours_list else ''
-                    is_open_now = opening_hours.get('openNow', None)
+                    is_open_now = opening_hours.get('open_now', None)
 
                     venue = {
                         'id': place_id,
@@ -3760,8 +3674,8 @@ def generate_party_venues(location, filters, exclude_ids):
                         'matchScore': min(98, int(place_rating * 18 + min(place_review_count / 100, 15) + party_bonus)),
                         'noiseLevel': 75,
                         'googleMapsUrl': google_maps_url,
-                        'website': place.get('websiteUri', ''),
-                        'phoneNumber': place.get('internationalPhoneNumber', ''),
+                        'website': '',  # Legacy API textsearch'ta website gelmez
+                        'phoneNumber': '',  # Legacy API textsearch'ta telefon gelmez
                         'hours': hours_text,
                         'weeklyHours': hours_list,
                         'isOpenNow': is_open_now,
@@ -4525,13 +4439,8 @@ def generate_venues(request):
         if gmaps:
             try:
                 import requests
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-Goog-Api-Key": settings.GOOGLE_MAPS_API_KEY,
-                    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.photos,places.priceLevel,places.types,places.location,places.reviews,places.websiteUri,places.internationalPhoneNumber,places.currentOpeningHours,places.businessStatus"
-                }
 
-                # İş Çıkışı Bira & Kokteyl ve Meyhane için Nearby Search kullan
+                # İş Çıkışı Bira & Kokteyl için Nearby Search kullan (Legacy API)
                 if category['name'] in nearby_search_categories:
                     # Önce lokasyonun koordinatlarını al (geocode)
                     geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
@@ -4549,46 +4458,40 @@ def generate_venues(request):
 
                             print(f"🗺️ Nearby Search - {category['name']}: {search_location} -> ({lat}, {lng})", file=sys.stderr, flush=True)
 
-                            # Nearby Search API çağrısı
-                            nearby_url = "https://places.googleapis.com/v1/places:searchNearby"
+                            # Legacy Nearby Search API çağrısı
+                            nearby_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
                             included_types = category_included_types.get(category['name'], ['bar', 'restaurant'])
 
-                            nearby_payload = {
-                                "includedTypes": included_types,
-                                "maxResultCount": 20,
-                                "locationRestriction": {
-                                    "circle": {
-                                        "center": {
-                                            "latitude": lat,
-                                            "longitude": lng
-                                        },
-                                        "radius": 2000.0  # 2km yarıçap
-                                    }
-                                },
-                                "languageCode": "tr"
+                            # Legacy API'de tek type gönderilebilir, birden fazla için ayrı call veya textsearch
+                            nearby_params = {
+                                "location": f"{lat},{lng}",
+                                "radius": 2000,  # 2km yarıçap
+                                "type": included_types[0] if included_types else "bar",
+                                "language": "tr",
+                                "key": settings.GOOGLE_MAPS_API_KEY
                             }
 
-                            print(f"🔍 Nearby Search types: {included_types}", file=sys.stderr, flush=True)
+                            print(f"🔍 Nearby Search type: {nearby_params['type']}", file=sys.stderr, flush=True)
 
-                            response = requests.post(nearby_url, json=nearby_payload, headers=headers)
+                            response = requests.get(nearby_url, params=nearby_params)
 
                             if response.status_code == 200:
                                 places_data = response.json()
-                                places_result = {'results': places_data.get('places', [])}
+                                places_result = {'results': places_data.get('results', [])}
                                 print(f"✅ Nearby Search sonuç: {len(places_result['results'])} mekan", file=sys.stderr, flush=True)
                             else:
                                 print(f"Nearby Search API hatası: {response.status_code} - {response.text}", file=sys.stderr, flush=True)
-                                # Fallback: Text Search kullan
-                                url = "https://places.googleapis.com/v1/places:searchText"
-                                payload = {
-                                    "textQuery": f"{search_query} in {search_location}, Turkey",
-                                    "languageCode": "tr",
-                                    "maxResultCount": 20
+                                # Fallback: Text Search kullan (Legacy API)
+                                url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+                                params = {
+                                    "query": f"{search_query} in {search_location}, Turkey",
+                                    "language": "tr",
+                                    "key": settings.GOOGLE_MAPS_API_KEY
                                 }
-                                response = requests.post(url, json=payload, headers=headers)
+                                response = requests.get(url, params=params)
                                 if response.status_code == 200:
                                     places_data = response.json()
-                                    places_result = {'results': places_data.get('places', [])}
+                                    places_result = {'results': places_data.get('results', [])}
                                 else:
                                     print(f"❌ Text Search fallback hatası: {response.status_code}", file=sys.stderr, flush=True)
                         else:
@@ -4596,21 +4499,21 @@ def generate_venues(request):
                     else:
                         print(f"❌ Geocode hatası: {geocode_response.status_code}", file=sys.stderr, flush=True)
                 else:
-                    # Diğer kategoriler için Text Search kullan
-                    url = "https://places.googleapis.com/v1/places:searchText"
-                    payload = {
-                        "textQuery": f"{search_query} in {search_location}, Turkey",
-                        "languageCode": "tr",
-                        "maxResultCount": 20  # Maximum sonuç
+                    # Diğer kategoriler için Text Search kullan (Legacy API)
+                    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+                    params = {
+                        "query": f"{search_query} in {search_location}, Turkey",
+                        "language": "tr",
+                        "key": settings.GOOGLE_MAPS_API_KEY
                     }
 
-                    print(f"DEBUG - Google Places API Query: {payload['textQuery']}", file=sys.stderr, flush=True)
+                    print(f"DEBUG - Google Places API Query: {params['query']}", file=sys.stderr, flush=True)
 
-                    response = requests.post(url, json=payload, headers=headers)
+                    response = requests.get(url, params=params)
 
                     if response.status_code == 200:
                         places_data = response.json()
-                        places_result = {'results': places_data.get('places', [])}
+                        places_result = {'results': places_data.get('results', [])}
                     else:
                         print(f"❌ Places API hatası: {response.status_code} - {response.text}", file=sys.stderr, flush=True)
 
@@ -4628,11 +4531,11 @@ def generate_venues(request):
         alcohol_filter = filters.get('alcohol', 'Any')
 
         for idx, place in enumerate(places_result.get('results', [])[:20]):
-            place_id = place.get('id', f"place_{idx}")
-            place_name = place.get('displayName', {}).get('text', '')
-            place_address = place.get('formattedAddress', '')
+            place_id = place.get('place_id', f"place_{idx}")
+            place_name = place.get('name', '')
+            place_address = place.get('formatted_address', '')
             place_rating = place.get('rating', 0)
-            place_review_count = place.get('userRatingCount', 0)
+            place_review_count = place.get('user_ratings_total', 0)
             place_types = place.get('types', [])
 
             # ===== EXCLUDE IDS FİLTRESİ: Daha önce gösterilen mekanları atla =====
@@ -4665,26 +4568,20 @@ def generate_venues(request):
                     print(f"❌ MAHALLE REJECT - {place_name} adresi '{selected_neighborhood}' içermiyor: {place_address}", file=sys.stderr, flush=True)
                     continue
 
-            # Fotoğraf URL'si
+            # Fotoğraf URL'si (Legacy API)
             photo_url = None
             if place.get('photos') and len(place['photos']) > 0:
-                photo_name = place['photos'][0].get('name', '')
-                if photo_name:
-                    photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?key={settings.GOOGLE_MAPS_API_KEY}&maxWidthPx=800"
+                photo_ref = place['photos'][0].get('photo_reference', '')
+                if photo_ref:
+                    photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference={photo_ref}&key={settings.GOOGLE_MAPS_API_KEY}"
 
             # Google Maps URL
             maps_query = urllib.parse.quote(f"{place_name} {place_address}")
             google_maps_url = f"https://www.google.com/maps/search/?api=1&query={maps_query}"
 
-            # Fiyat aralığı
-            price_level_str = place.get('priceLevel', 'PRICE_LEVEL_MODERATE')
-            price_level_map = {
-                'PRICE_LEVEL_FREE': 1, 'PRICE_LEVEL_INEXPENSIVE': 1,
-                'PRICE_LEVEL_MODERATE': 2, 'PRICE_LEVEL_EXPENSIVE': 3,
-                'PRICE_LEVEL_VERY_EXPENSIVE': 4
-            }
-            price_level = price_level_map.get(price_level_str, 2)
-            price_map = {1: '$', 2: '$$', 3: '$$$', 4: '$$$$'}
+            # Fiyat aralığı (Legacy API: 0-4 integer)
+            price_level = place.get('price_level', 2)
+            price_map = {0: '$', 1: '$', 2: '$$', 3: '$$$', 4: '$$$$'}
             price_range = price_map.get(price_level, '$$')
 
             # Budget filtresine göre kontrol
@@ -5000,27 +4897,14 @@ def generate_venues(request):
             # Google Reviews'ı parse et (max 10, en yeniden eskiye sıralı)
             google_reviews = []
             raw_reviews = place.get('reviews', [])
-            # publishTime'a göre en yeniden eskiye sırala
-            sorted_reviews = sorted(
-                raw_reviews,
-                key=lambda r: r.get('publishTime', ''),
-                reverse=True
-            )[:10]  # Max 10 yorum
-            for review in sorted_reviews:
-                google_reviews.append({
-                    'authorName': review.get('authorAttribution', {}).get('displayName', 'Anonim'),
-                    'rating': review.get('rating', 5),
-                    'text': review.get('text', {}).get('text', ''),
-                    'relativeTime': review.get('relativePublishTimeDescription', ''),
-                    'profilePhotoUrl': review.get('authorAttribution', {}).get('photoUri', ''),
-                    'publishTime': review.get('publishTime', '')
-                })
+            # Legacy API textsearch'ta reviews gelmez - boş bırakıyoruz
+            google_reviews = []
 
-            # Çalışma saatleri - tüm hafta
-            opening_hours = place.get('currentOpeningHours', {})
-            hours_list = opening_hours.get('weekdayDescriptions', [])  # 7 günlük liste
+            # Çalışma saatleri - Legacy API format
+            opening_hours = place.get('opening_hours', {})
+            hours_list = opening_hours.get('weekday_text', [])  # 7 günlük liste
             hours_text = hours_list[0] if hours_list else ''  # Bugünün saati (backward compat)
-            is_open_now = opening_hours.get('openNow', None)  # Şu an açık mı?
+            is_open_now = opening_hours.get('open_now', None)  # Şu an açık mı?
 
             # Filtreyi geçen mekanları topla
             filtered_places.append({
@@ -5034,9 +4918,9 @@ def generate_venues(request):
                 'google_maps_url': google_maps_url,
                 'price_range': price_range,
                 'google_reviews': google_reviews,
-                'website': extract_website(place.get('websiteUri', '')),
-                'instagram_url': extract_instagram(place.get('websiteUri', '')),
-                'phone_number': place.get('internationalPhoneNumber', ''),
+                'website': '',  # Legacy API textsearch'ta website gelmez
+                'instagram_url': '',  # Legacy API textsearch'ta website gelmez
+                'phone_number': '',  # Legacy API textsearch'ta telefon gelmez
                 'hours': hours_text,
                 'weeklyHours': hours_list,  # Tüm haftalık saatler
                 'isOpenNow': is_open_now  # Şu an açık mı?
@@ -5666,21 +5550,16 @@ def get_similar_venues(request):
 
         search_type = type_query_map.get(venue_type, 'restaurant cafe')
 
-        # Google Places API ile benzer mekanlar ara
+        # Google Places API ile benzer mekanlar ara (Legacy API)
         import requests
-        url = "https://places.googleapis.com/v1/places:searchText"
-        headers = {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": settings.GOOGLE_MAPS_API_KEY,
-            "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.photos,places.priceLevel,places.types,places.location"
-        }
-        payload = {
-            "textQuery": f"{search_type} in {location_query}",
-            "languageCode": "tr",
-            "maxResultCount": 10
+        url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+        params = {
+            "query": f"{search_type} in {location_query}",
+            "language": "tr",
+            "key": settings.GOOGLE_MAPS_API_KEY
         }
 
-        response = requests.post(url, json=payload, headers=headers)
+        response = requests.get(url, params=params)
 
         if response.status_code != 200:
             return Response(
@@ -5689,35 +5568,27 @@ def get_similar_venues(request):
             )
 
         places_data = response.json()
-        places = places_data.get('places', [])
+        places = places_data.get('results', [])
 
         # Her mekan için Gemini ile detaylı analiz
         similar_venues = []
         model = get_genai_model()
 
         for idx, place in enumerate(places[:8]):  # İlk 8 mekan
-            place_name = place.get('displayName', {}).get('text', '')
-            place_address = place.get('formattedAddress', '')
+            place_name = place.get('name', '')
+            place_address = place.get('formatted_address', '')
             place_rating = place.get('rating', 0)
 
-            # Fotoğraf URL'si
+            # Fotoğraf URL'si (Legacy API)
             photo_url = None
             if place.get('photos') and len(place['photos']) > 0:
-                photo_name = place['photos'][0].get('name', '')
-                if photo_name:
-                    photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?key={settings.GOOGLE_MAPS_API_KEY}&maxWidthPx=800"
+                photo_ref = place['photos'][0].get('photo_reference', '')
+                if photo_ref:
+                    photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference={photo_ref}&key={settings.GOOGLE_MAPS_API_KEY}"
 
-            # Fiyat seviyesi
-            price_level_str = place.get('priceLevel', 'PRICE_LEVEL_MODERATE')
-            price_level_map = {
-                'PRICE_LEVEL_FREE': 1,
-                'PRICE_LEVEL_INEXPENSIVE': 1,
-                'PRICE_LEVEL_MODERATE': 2,
-                'PRICE_LEVEL_EXPENSIVE': 3,
-                'PRICE_LEVEL_VERY_EXPENSIVE': 4
-            }
-            price_level = price_level_map.get(price_level_str, 2)
-            price_map = {1: '$', 2: '$$', 3: '$$$', 4: '$$$$'}
+            # Fiyat seviyesi (Legacy API: 0-4 integer)
+            price_level = place.get('price_level', 2)
+            price_map = {0: '$', 1: '$', 2: '$$', 3: '$$$', 4: '$$$$'}
             price_range = price_map.get(price_level, '$$')
 
             # Gemini ile açıklama oluştur
