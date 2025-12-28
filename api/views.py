@@ -1238,6 +1238,7 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
     import requests
     import re
 
+    gmaps = get_gmaps_client()
     city = location['city']
     districts = location.get('districts', [])
     neighborhoods = location.get('neighborhoods', [])
