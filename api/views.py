@@ -492,6 +492,24 @@ def get_gm_venues_for_category(category_id: str, category_name: str, city: str, 
                     place = places_result['results'][0]
                     place_id = place.get('place_id')
 
+                    # İsim eşleşme kontrolü - Google'ın döndürdüğü isim G&M restoranıyla eşleşmeli
+                    google_name = place.get('name', '').lower()
+                    search_name = restaurant_name.lower()
+                    # Normalize et
+                    google_name_norm = google_name.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                    search_name_norm = search_name.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+
+                    # İsim eşleşme kontrolü - aranan kelimelerin çoğunluğu Google sonucunda olmalı
+                    search_words = set(search_name_norm.split())
+                    google_words = set(google_name_norm.split())
+                    common_words = search_words & google_words
+
+                    # 2+ kelimelik aramalarda en az %80 eşleşme, tek kelimede tam eşleşme
+                    min_match_ratio = 0.8 if len(search_words) >= 2 else 1.0
+                    if len(common_words) < len(search_words) * min_match_ratio:
+                        print(f"❌ G&M İSİM REJECT - Aranan: '{restaurant_name}', Bulunan: '{place.get('name')}' - eşleşmiyor", file=sys.stderr, flush=True)
+                        continue
+
                     # Detay bilgisi al
                     details = gmaps.place(
                         place_id,
