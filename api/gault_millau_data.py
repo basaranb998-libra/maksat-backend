@@ -634,7 +634,7 @@ GAULT_MILLAU_RESTAURANTS_LIST: List[Dict] = [
         "name": "Kokoreççi Asım Usta",
         "toques": 1,
         "award": "En İyi Sokak Lezzeti",
-        "city": "Istanbul",
+        "city": "Izmir",
         "chef": "Cihan Yılmaz",
         "instagram": "kokorecciasimusta",
         "categories": [CATEGORY_SOKAK]
