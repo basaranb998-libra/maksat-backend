@@ -5112,11 +5112,8 @@ def generate_venues(request):
                     print(f"❌ ZİNCİR MEKAN REJECT - {place_name}: romantik kategori için uygunsuz", file=sys.stderr, flush=True)
                     continue
 
-            # Google Reviews'ı parse et (max 10, en yeniden eskiye sıralı)
-            google_reviews = []
-            raw_reviews = place.get('reviews', [])
-            # Legacy API textsearch'ta reviews gelmez - boş bırakıyoruz
-            google_reviews = []
+            # Place Details ile yorumları al
+            google_reviews = get_place_reviews(gmaps, place_id) if place_id else []
 
             # Çalışma saatleri - Legacy API format
             opening_hours = place.get('opening_hours', {})
