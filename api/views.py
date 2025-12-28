@@ -4943,9 +4943,10 @@ def generate_venues(request):
             restaurant_categories = [
                 'İlk Buluşma', 'Fine Dining', 'Özel Gün', 'İş Yemeği', 'Öğlen Yemeği',
                 'Esnaf Lokantası', 'Balıkçı', 'Meyhane', 'Muhabbet', 'Brunch',
-                '3. Nesil Kahveci', 'İş Çıkışı Bira & Kokteyl', 'Sokak Lezzeti',
+                'İş Çıkışı Bira & Kokteyl', 'Sokak Lezzeti',
                 'Burger & Fast', 'Pizzacı'
             ]
+            # NOT: 3. Nesil Kahveci bu listede YOK - butik kahveciler için sıkı filtreler uygulanmaz
 
             if category_name in restaurant_categories:
                 # 1. Puan filtresi - 4.0 ve üstü kabul
