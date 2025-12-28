@@ -360,6 +360,45 @@ def get_gmaps_client():
     return googlemaps.Client(key=settings.GOOGLE_MAPS_API_KEY) if settings.GOOGLE_MAPS_API_KEY else None
 
 
+def get_place_reviews(gmaps, place_id: str, max_reviews: int = 5) -> list:
+    """
+    Place Details API ile yorumları al.
+    Legacy API'de textsearch yorumları döndürmez, bu fonksiyon ile alınır.
+
+    Args:
+        gmaps: Google Maps client
+        place_id: Mekan place_id
+        max_reviews: Maksimum yorum sayısı (default 5, API limiti de 5)
+
+    Returns:
+        Yorum listesi
+    """
+    import sys
+    if not gmaps or not place_id:
+        return []
+
+    try:
+        details = gmaps.place(
+            place_id,
+            fields=['reviews'],
+            language='tr'
+        )
+        reviews = []
+        if details.get('result', {}).get('reviews'):
+            for review in details['result']['reviews'][:max_reviews]:
+                reviews.append({
+                    'authorName': review.get('author_name', ''),
+                    'rating': review.get('rating', 5),
+                    'text': review.get('text', ''),
+                    'relativeTime': review.get('relative_time_description', ''),
+                    'profilePhotoUrl': review.get('profile_photo_url', '')
+                })
+        return reviews
+    except Exception as e:
+        print(f"⚠️ Place reviews error for {place_id}: {e}", file=sys.stderr, flush=True)
+        return []
+
+
 # ===== GAULT & MILLAU HELPER FONKSİYONLARI =====
 # Kategori ID -> Kategori adı eşleştirmesi
 CATEGORY_ID_TO_NAME = {
@@ -1449,13 +1488,14 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
 
                 michelin_info = is_michelin_restaurant(place_name)
 
-                # Legacy API'de reviews textsearch'ta gelmez
-                google_reviews = []
+                # Place Details ile yorumları al
+                place_id = place.get('place_id')
+                google_reviews = get_place_reviews(gmaps, place_id) if place_id else []
 
                 opening_hours = place.get('opening_hours', {})
 
                 venue_data = {
-                    'id': place.get('place_id', f"fd_{idx+1}"),
+                    'id': place_id or f"fd_{idx+1}",
                     'name': place_name,
                     'base_description': f"Fine dining deneyimi sunan şık ve kaliteli bir restoran.",
                     'imageUrl': photo_url,
@@ -2853,8 +2893,8 @@ def generate_bar_venues(location, filters, exclude_ids):
                     price_map = {0: '₺', 1: '₺₺', 2: '₺₺₺', 3: '₺₺₺₺', 4: '₺₺₺₺₺'}
                     price_range = price_map.get(price_level, '₺₺₺')
 
-                    # Legacy API'de reviews textsearch'ta gelmez
-                    google_reviews = []
+                    # Place Details ile yorumları al
+                    google_reviews = get_place_reviews(gmaps, place_id) if place_id else []
 
                     # Vibe tags
                     vibe_tags = ['#İşÇıkışı', f'#{bar_type.replace(" ", "").replace("/", "")}', '#AfterWork']
@@ -3240,8 +3280,8 @@ def generate_street_food_places(location, filters, exclude_ids):
                     price_map = {0: '$', 1: '$', 2: '$$', 3: '$$$', 4: '$$$$'}
                     price_range = price_map.get(price_level, '$')
 
-                    # Legacy API'de reviews textsearch'ta gelmez
-                    google_reviews = []
+                    # Place Details ile yorumları al
+                    google_reviews = get_place_reviews(gmaps, place_id) if place_id else []
 
                     # Vibe tags
                     vibe_tags = ['#SokakLezzeti', f'#{food_type.replace(" ", "")}', '#Yerel']
@@ -3661,27 +3701,7 @@ def generate_party_venues(location, filters, exclude_ids):
                         print(f"❌ KAPALI MEKAN REJECT - {place_name}: {business_status}", file=sys.stderr, flush=True)
                         continue
 
-                    # Legacy API'de reviews textsearch'ta gelmez, bu kontrolü atlıyoruz
-                    raw_reviews = []
-                    if raw_reviews:
-                        from datetime import datetime, timedelta
-                        seven_months_ago = datetime.now() - timedelta(days=210)  # 7 ay
-
-                        latest_review_time = None
-                        for review in raw_reviews:
-                            publish_time_str = review.get('publishTime', '')
-                            if publish_time_str:
-                                try:
-                                    review_time = datetime.fromisoformat(publish_time_str.replace('Z', '+00:00'))
-                                    review_time = review_time.replace(tzinfo=None)
-                                    if latest_review_time is None or review_time > latest_review_time:
-                                        latest_review_time = review_time
-                                except:
-                                    pass
-
-                        if latest_review_time and latest_review_time < seven_months_ago:
-                            print(f"❌ ESKİ YORUM REJECT - {place_name}: son yorum {latest_review_time.strftime('%Y-%m-%d')} (7 aydan eski)", file=sys.stderr, flush=True)
-                            continue
+                    # Yorum kontrolü şimdilik atlıyoruz - yorumlar daha sonra alınacak
 
                     # İlçe kontrolü
                     if selected_district:
@@ -3811,11 +3831,16 @@ def generate_party_venues(location, filters, exclude_ids):
                     price_map = {0: '$$', 1: '$$', 2: '$$', 3: '$$$', 4: '$$$$'}
                     price_range = price_map.get(price_level, '$$')
 
-                    # Legacy API'de reviews textsearch'ta gelmez
-                    google_reviews = []
+                    # Place Details ile yorumları al
+                    google_reviews = get_place_reviews(gmaps, place_id) if place_id else []
 
-                    # Legacy API'de yorum olmadığı için bonus 0
+                    # Yorumlarda parti keyword'leri sayısı ve tüm yorum metni
                     party_keyword_matches = 0
+                    all_review_text = ' '.join([r.get('text', '').lower() for r in google_reviews])
+                    for review in google_reviews:
+                        review_text = review.get('text', '').lower()
+                        if any(kw in review_text for kw in ['parti', 'party', 'dj', 'eğlence', 'dans', 'dance', 'canlı müzik', 'gece']):
+                            party_keyword_matches += 1
 
                     # Bonus puan: Yorumlarda parti keyword'leri varsa
                     party_bonus = min(15, party_keyword_matches * 3)  # Her keyword için +3, max +15
