@@ -383,13 +383,14 @@ def discover_instagram_url(
     if not instagram_url and website:
         instagram_url = find_instagram_from_website(website)
 
-    # 3. Mekan adından tahmin et ve doğrula
-    if not instagram_url:
-        instagram_url = guess_instagram_from_name(venue_name, city)
-
-    # 4. Google Custom Search ile ara (API key varsa)
+    # 3. Google Custom Search ile ara (API key varsa) - güvenilir sonuçlar
     if not instagram_url and GOOGLE_API_KEY and GOOGLE_CSE_ID:
         instagram_url = search_instagram_google(venue_name, city)
+
+    # 4. Mekan adından tahmin DEVRE DIŞI - çok fazla yanlış sonuç veriyor
+    # Sadece onaylanmış kaynaklar (Gemini, website, Google CSE) kullanılıyor
+    # if not instagram_url:
+    #     instagram_url = guess_instagram_from_name(venue_name, city)
 
     # Cache'e kaydet (None da dahil - negatif cache, ama daha kısa süre)
     _instagram_cache[cache_key] = instagram_url
