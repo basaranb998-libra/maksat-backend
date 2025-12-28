@@ -611,15 +611,6 @@ GAULT_MILLAU_RESTAURANTS_LIST: List[Dict] = [
         "instagram": "datcasofrasi",
         "categories": [CATEGORY_KAHVALTI, CATEGORY_MEYHANE]
     },
-    {
-        "name": "Street Bites",
-        "toques": 1,
-        "award": None,
-        "city": "Izmir",
-        "chef": None,
-        "instagram": "streetbitesizmir",
-        "categories": [CATEGORY_SOKAK]
-    },
     # Sokak Lezzetleri Ödülleri
     {
         "name": "Basta! Street Food Bar",
