@@ -551,6 +551,134 @@ def get_gm_venues_for_category(category_id: str, category_name: str, city: str, 
         return []
 
 
+def enrich_gm_venues_with_gemini(gm_venues: list, category_name: str) -> list:
+    """
+    G&M mekanlarını Gemini ile zenginleştirir.
+    practicalInfo, atmosphereSummary, description ve vibeTags ekler.
+    """
+    import sys
+    import json
+    import re
+
+    if not gm_venues:
+        return []
+
+    try:
+        model = get_genai_model()
+        if not model:
+            print(f"⚠️ Gemini model bulunamadı, G&M mekanları zenginleştirilmeden döndürülüyor", file=sys.stderr, flush=True)
+            return gm_venues
+
+        # G&M mekanlarını Gemini'ye gönderilecek formata çevir
+        places_list_items = []
+        for i, v in enumerate(gm_venues[:10]):
+            gm_info = ""
+            if v.get('gaultMillauToques'):
+                gm_info = f" | G&M: {v['gaultMillauToques']} Toque"
+            if v.get('gaultMillauAward'):
+                gm_info += f" ({v['gaultMillauAward']})"
+
+            places_list_items.append(
+                f"{i+1}. {v['name']} | Rating: {v.get('googleRating', 'N/A')} | Fiyat: {v.get('priceRange', '$$')}{gm_info}"
+            )
+        places_list = "\n".join(places_list_items)
+
+        batch_prompt = f"""Kategori: {category_name}
+Bu mekanlar Gault & Millau ödüllü prestijli restoranlardır.
+
+Mekanlar:
+{places_list}
+
+Her mekan için analiz yap ve JSON döndür:
+{{
+  "name": "Mekan Adı",
+  "description": "2-3 cümle Türkçe - mekanın öne çıkan özelliği ve neden G&M ödülü aldığı",
+  "vibeTags": ["#GaultMillau", "#Tag2", "#Tag3"],
+  "practicalInfo": {{
+    "reservationNeeded": "Şart" | "Tavsiye Edilir" | null,
+    "crowdLevel": "Sakin" | "Orta" | "Kalabalık" | null,
+    "parking": "Kolay" | "Zor" | "Otopark var" | null,
+    "hasValet": true | false | null,
+    "outdoorSeating": true | false | null,
+    "alcoholServed": true | false | null,
+    "priceFeeling": "Fiyatına Değer" | "Premium" | null,
+    "mustTry": "Şefin imza yemeği veya öne çıkan lezzet" | null,
+    "headsUp": "Bilmeniz gereken önemli bilgi" | null
+  }},
+  "atmosphereSummary": {{
+    "noiseLevel": "Sessiz" | "Sohbet Dostu" | "Canlı",
+    "lighting": "Loş" | "Yumuşak" | "Aydınlık",
+    "privacy": "Özel" | "Yarı Özel" | "Açık Alan",
+    "energy": "Sakin" | "Dengeli" | "Enerjik",
+    "idealFor": ["özel gün", "iş yemeği", "romantik akşam"],
+    "notIdealFor": ["hızlı yemek"],
+    "oneLiner": "Tek cümle Türkçe atmosfer özeti"
+  }}
+}}
+
+Kurallar:
+- G&M ödüllü mekanlar genellikle fine dining, yüksek kalite ve özel deneyim sunar
+- vibeTags'ta mutlaka #GaultMillau olsun, toque sayısına göre #2Toque, #3Toque ekle
+- Türkiye'nin en prestijli restoranları - buna göre değerlendir
+- reservationNeeded genellikle "Şart" veya "Tavsiye Edilir" olmalı
+
+SADECE JSON ARRAY döndür, başka açıklama yazma."""
+
+        print(f"🏆 G&M Gemini zenginleştirme başlıyor ({len(gm_venues)} mekan)...", file=sys.stderr, flush=True)
+
+        response = model.generate_content(batch_prompt)
+        response_text = response.text.strip()
+
+        # Markdown code block temizle
+        response_text = re.sub(r'```json\s*|\s*```', '', response_text)
+        response_text = response_text.strip()
+
+        try:
+            ai_results = json.loads(response_text)
+        except json.JSONDecodeError:
+            # Array bulmaya çalış
+            match = re.search(r'\[.*\]', response_text, re.DOTALL)
+            if match:
+                ai_results = json.loads(match.group())
+            else:
+                print(f"⚠️ G&M Gemini JSON parse edilemedi", file=sys.stderr, flush=True)
+                return gm_venues
+
+        # AI sonuçlarını mekanlarla eşleştir
+        ai_by_name = {r.get('name', '').lower(): r for r in ai_results}
+
+        enriched_venues = []
+        for venue in gm_venues:
+            ai_data = ai_by_name.get(venue['name'].lower(), {})
+
+            # Zenginleştirilmiş veriyi ekle
+            enriched = venue.copy()
+
+            if ai_data.get('description'):
+                enriched['description'] = ai_data['description']
+
+            if ai_data.get('vibeTags'):
+                # Mevcut #GaultMillau tag'ini koru, yenilerini ekle
+                existing_tags = set(enriched.get('vibeTags', []))
+                new_tags = set(ai_data['vibeTags'])
+                enriched['vibeTags'] = list(existing_tags | new_tags)
+
+            if ai_data.get('practicalInfo'):
+                enriched['practicalInfo'] = ai_data['practicalInfo']
+
+            if ai_data.get('atmosphereSummary'):
+                enriched['atmosphereSummary'] = ai_data['atmosphereSummary']
+
+            enriched_venues.append(enriched)
+
+        print(f"✅ G&M Gemini ile {len(enriched_venues)} mekan zenginleştirildi", file=sys.stderr, flush=True)
+        return enriched_venues
+
+    except Exception as e:
+        print(f"⚠️ G&M Gemini zenginleştirme hatası: {e}", file=sys.stderr, flush=True)
+        return gm_venues
+
+
 # ===== CACHE HELPER FONKSİYONLARI (SWR - Stale-While-Revalidate) =====
 CACHE_VENUES_LIMIT = 10  # Cache'ten alınacak venue sayısı (normal istek için)
 CACHE_VENUES_LIMIT_LOAD_MORE = 20  # Load More için daha fazla venue çek
@@ -3261,10 +3389,12 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
                     # ===== G&M VENUE'LARI EN BAŞA EKLE =====
                     if gm_venues:
+                        # G&M mekanlarını Gemini ile zenginleştir
+                        enriched_gm = enrich_gm_venues_with_gemini(gm_venues, 'Sokak Lezzeti')
                         combined_result = []
                         existing_ids = set()
                         # 1. Önce G&M venue'larını ekle
-                        for gv in gm_venues:
+                        for gv in enriched_gm:
                             if len(combined_result) < 10:
                                 combined_result.append(gv)
                                 existing_ids.add(gv.get('id'))
@@ -3273,7 +3403,7 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                             if len(combined_result) < 10 and fv.get('id') not in existing_ids:
                                 combined_result.append(fv)
                                 existing_ids.add(fv.get('id'))
-                        print(f"🔀 HYBRID RESULT - G&M: {len(gm_venues)}, Gemini: {len(final_venues)}, Combined: {len(combined_result)}", file=sys.stderr, flush=True)
+                        print(f"🔀 HYBRID RESULT - G&M: {len(enriched_gm)}, Gemini: {len(final_venues)}, Combined: {len(combined_result)}", file=sys.stderr, flush=True)
                         return Response(combined_result, status=status.HTTP_200_OK)
                     return Response(final_venues, status=status.HTTP_200_OK)
 
@@ -4214,7 +4344,9 @@ def generate_venues(request):
 
                 # Eğer 10'dan fazla G&M restoran varsa sadece ilk 10'u döndür
                 if gm_count >= 10:
-                    return Response(gm_venues[:10], status=status.HTTP_200_OK)
+                    # G&M mekanlarını Gemini ile zenginleştir
+                    enriched_gm = enrich_gm_venues_with_gemini(gm_venues[:10], category_name)
+                    return Response(enriched_gm, status=status.HTTP_200_OK)
 
                 # 10'dan az G&M restoran var, cache/API ile tamamla
                 # G&M place_id'lerini exclude listesine ekle (tekrar çekmemek için)
@@ -4286,13 +4418,15 @@ def generate_venues(request):
             enriched_venues = enrich_cached_venues_with_instagram(cached_venues, city)
             # G&M venue'larını başa ekle (varsa) - duplicate önleme ile
             if gm_venues:
+                # G&M mekanlarını Gemini ile zenginleştir
+                enriched_gm = enrich_gm_venues_with_gemini(gm_venues, category_name)
                 # G&M venue ID'lerini al
-                gm_ids = {v.get('id') for v in gm_venues if v.get('id')}
+                gm_ids = {v.get('id') for v in enriched_gm if v.get('id')}
                 # enriched_venues'dan G&M ID'lerini çıkar (duplicate önleme)
                 enriched_venues = [v for v in enriched_venues if v.get('id') not in gm_ids]
                 # G&M'leri başa ekle, kalan slotları doldur
-                remaining_slots = 10 - len(gm_venues)
-                final_venues = gm_venues + enriched_venues[:remaining_slots]
+                remaining_slots = 10 - len(enriched_gm)
+                final_venues = enriched_gm + enriched_venues[:remaining_slots]
                 return Response(final_venues, status=status.HTTP_200_OK)
             return Response(enriched_venues, status=status.HTTP_200_OK)
 
@@ -5358,14 +5492,16 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
         # G&M venue'larını başa ekle (varsa ve LoadMore değilse)
         if gm_venues and not is_load_more_request:
+            # G&M mekanlarını Gemini ile zenginleştir
+            enriched_gm = enrich_gm_venues_with_gemini(gm_venues, category_name)
             # G&M venue ID'lerini al
-            gm_ids = {v.get('id') for v in gm_venues if v.get('id')}
+            gm_ids = {v.get('id') for v in enriched_gm if v.get('id')}
             # combined_venues'dan G&M ID'lerini çıkar (duplicate önleme)
             combined_venues = [v for v in combined_venues if v.get('id') not in gm_ids]
             # G&M'leri başa ekle, kalan slotları doldur
-            remaining_slots = 10 - len(gm_venues)
-            combined_venues = gm_venues + combined_venues[:remaining_slots]
-            print(f"🏆 G&M PREPEND (HYBRID) - {len(gm_venues)} G&M venue başa eklendi (duplicate temizlendi)", file=sys.stderr, flush=True)
+            remaining_slots = 10 - len(enriched_gm)
+            combined_venues = enriched_gm + combined_venues[:remaining_slots]
+            print(f"🏆 G&M PREPEND (HYBRID) - {len(enriched_gm)} G&M venue başa eklendi (Gemini zenginleştirildi)", file=sys.stderr, flush=True)
 
         # Arama geçmişine kaydet
         if request.user.is_authenticated:
