@@ -360,10 +360,10 @@ def get_gmaps_client():
     return googlemaps.Client(key=settings.GOOGLE_MAPS_API_KEY) if settings.GOOGLE_MAPS_API_KEY else None
 
 
-def get_place_reviews(gmaps, place_id: str, max_reviews: int = 5) -> list:
+def get_place_details_extended(gmaps, place_id: str, max_reviews: int = 5) -> dict:
     """
-    Place Details API ile yorumları al.
-    Legacy API'de textsearch yorumları döndürmez, bu fonksiyon ile alınır.
+    Place Details API ile yorumları ve yemek servis bilgilerini al.
+    Legacy API'de textsearch bu bilgileri döndürmez, bu fonksiyon ile alınır.
 
     Args:
         gmaps: Google Maps client
@@ -371,21 +371,31 @@ def get_place_reviews(gmaps, place_id: str, max_reviews: int = 5) -> list:
         max_reviews: Maksimum yorum sayısı (default 5, API limiti de 5)
 
     Returns:
-        Yorum listesi
+        {'reviews': [...], 'foodServices': {...}}
     """
     import sys
     if not gmaps or not place_id:
-        return []
+        return {'reviews': [], 'foodServices': {}}
 
     try:
+        # Atmosphere SKU alanları - reviews zaten alınıyordu, diğerlerini ekliyoruz (ek maliyet yok)
         details = gmaps.place(
             place_id,
-            fields=['reviews'],
+            fields=[
+                'reviews',
+                'serves_breakfast', 'serves_lunch', 'serves_dinner', 'serves_brunch',
+                'serves_beer', 'serves_wine', 'serves_vegetarian_food',
+                'dine_in', 'takeout', 'delivery', 'reservable'
+            ],
             language='tr'
         )
+
+        result = details.get('result', {})
+
+        # Yorumları parse et
         reviews = []
-        if details.get('result', {}).get('reviews'):
-            for review in details['result']['reviews'][:max_reviews]:
+        if result.get('reviews'):
+            for review in result['reviews'][:max_reviews]:
                 reviews.append({
                     'authorName': review.get('author_name', ''),
                     'rating': review.get('rating', 5),
@@ -393,10 +403,38 @@ def get_place_reviews(gmaps, place_id: str, max_reviews: int = 5) -> list:
                     'relativeTime': review.get('relative_time_description', ''),
                     'profilePhotoUrl': review.get('profile_photo_url', '')
                 })
-        return reviews
+
+        # Yemek servis bilgilerini parse et
+        food_services = {
+            'servesBreakfast': result.get('serves_breakfast'),
+            'servesLunch': result.get('serves_lunch'),
+            'servesDinner': result.get('serves_dinner'),
+            'servesBrunch': result.get('serves_brunch'),
+            'servesBeer': result.get('serves_beer'),
+            'servesWine': result.get('serves_wine'),
+            'servesVegetarianFood': result.get('serves_vegetarian_food'),
+            'dineIn': result.get('dine_in'),
+            'takeout': result.get('takeout'),
+            'delivery': result.get('delivery'),
+            'reservable': result.get('reservable'),
+        }
+
+        # None değerleri temizle
+        food_services = {k: v for k, v in food_services.items() if v is not None}
+
+        return {'reviews': reviews, 'foodServices': food_services}
     except Exception as e:
-        print(f"⚠️ Place reviews error for {place_id}: {e}", file=sys.stderr, flush=True)
-        return []
+        print(f"⚠️ Place details error for {place_id}: {e}", file=sys.stderr, flush=True)
+        return {'reviews': [], 'foodServices': {}}
+
+
+def get_place_reviews(gmaps, place_id: str, max_reviews: int = 5) -> list:
+    """
+    Place Details API ile yorumları al (geriye uyumluluk için).
+    Legacy API'de textsearch yorumları döndürmez, bu fonksiyon ile alınır.
+    """
+    result = get_place_details_extended(gmaps, place_id, max_reviews)
+    return result.get('reviews', [])
 
 
 # ===== GAULT & MILLAU HELPER FONKSİYONLARI =====
@@ -5117,8 +5155,10 @@ def generate_venues(request):
                     print(f"❌ ZİNCİR MEKAN REJECT - {place_name}: romantik kategori için uygunsuz", file=sys.stderr, flush=True)
                     continue
 
-            # Place Details ile yorumları al
-            google_reviews = get_place_reviews(gmaps, place_id) if place_id else []
+            # Place Details ile yorumları ve yemek servis bilgilerini al
+            place_details = get_place_details_extended(gmaps, place_id) if place_id else {'reviews': [], 'foodServices': {}}
+            google_reviews = place_details.get('reviews', [])
+            food_services = place_details.get('foodServices', {})
 
             # Çalışma saatleri - Legacy API format
             opening_hours = place.get('opening_hours', {})
@@ -5138,6 +5178,7 @@ def generate_venues(request):
                 'google_maps_url': google_maps_url,
                 'price_range': price_range,
                 'google_reviews': google_reviews,
+                'food_services': food_services,  # Google'dan gelen yemek servis bilgileri
                 'website': '',  # Legacy API textsearch'ta website gelmez
                 'instagram_url': '',  # Legacy API textsearch'ta website gelmez
                 'phone_number': '',  # Legacy API textsearch'ta telefon gelmez
@@ -5455,6 +5496,7 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                             'isOpenNow': place.get('isOpenNow', None),
                             'isMichelinStarred': is_michelin_restaurant(place['name']) is not None,
                             'practicalInfo': ai_data.get('practicalInfo', {}),
+                            'foodServices': place.get('food_services', {}),  # Google'dan gelen yemek servis bilgileri
                             'atmosphereSummary': ai_data.get('atmosphereSummary', {
                                 'noiseLevel': 'Sohbet Dostu',
                                 'lighting': 'Yumuşak',
@@ -5520,6 +5562,7 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                         'isOpenNow': place.get('isOpenNow', None),
                         'isMichelinStarred': is_michelin_restaurant(place['name']) is not None,
                         'practicalInfo': {},
+                        'foodServices': place.get('food_services', {}),  # Google'dan gelen yemek servis bilgileri
                         'atmosphereSummary': {
                             'noiseLevel': 'Sohbet Dostu',
                             'lighting': 'Yumuşak',
