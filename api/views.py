@@ -4526,7 +4526,7 @@ def generate_venues(request):
         if alcohol_filter == 'Alcoholic':
             # Alkollü mekan seçilirse SADECE bar, pub, restaurant, wine bar ara
             category_query_map = {
-                'İlk Buluşma': 'bar wine bar restaurant pub',
+                'İlk Buluşma': 'romantic restaurant wine bar cocktail bar date night fine dining lounge',
                 'İş Yemeği': 'restaurant bar hotel lounge business lunch',
                 'Muhabbet': 'bar pub lounge restaurant wine bar',
                 'İş Çıkışı Bira & Kokteyl': 'bar pub cocktail bar beer garden',
@@ -4556,7 +4556,7 @@ def generate_venues(request):
         elif alcohol_filter == 'Non-Alcoholic':
             # Alkolsüz mekan seçilirse SADECE cafe, bakery, coffee shop ara
             category_query_map = {
-                'İlk Buluşma': 'cafe coffee shop bakery tea house',
+                'İlk Buluşma': 'romantic cafe restaurant patisserie brunch spot cozy restaurant date spot',
                 'İş Yemeği': 'business lunch cafe restaurant coffee shop',
                 'Muhabbet': 'cafe coffee shop tea house quiet cafe',
                 'İş Çıkışı Bira & Kokteyl': 'cafe coffee shop juice bar',
@@ -4584,7 +4584,7 @@ def generate_venues(request):
         else:
             # Any seçilirse her türlü mekan (varsayılan)
             category_query_map = {
-                'İlk Buluşma': 'cafe restaurant bar wine bar coffee shop',
+                'İlk Buluşma': 'romantic restaurant cafe wine bar date spot fine dining cozy bistro',
                 'İş Yemeği': 'business lunch restaurant cafe meeting spot',
                 'Muhabbet': 'cafe bar lounge restaurant cozy spot conversation friendly',
                 'İş Çıkışı Bira & Kokteyl': 'bar pub cocktail bar beer garden after work drinks',
