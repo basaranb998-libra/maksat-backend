@@ -4821,16 +4821,20 @@ def generate_venues(request):
 
             if alcohol_filter == 'Alcoholic' and not skip_alcohol_filter:
                 # Kahve/kafe mekanlarını filtrele - hem types hem isimde kontrol et
-                coffee_keywords = ['cafe', 'coffee', 'kahve', 'kafe', 'bakery', 'tea_house', 'pastry', 'patisserie', 'firin', 'borek']
+                coffee_keywords = ['cafe', 'coffee', 'kahve', 'kafe', 'bakery', 'tea_house', 'pastry', 'patisserie',
+                                   'firin', 'borek', 'kahveci', 'pastane', 'tatlici', 'muhallebici', 'dondurma',
+                                   'dessert', 'ice_cream', 'sweet', 'catering']
 
                 # Types içinde varsa filtrele
                 if any(keyword in place_types_str for keyword in coffee_keywords):
                     print(f"❌ ALKOL REJECT (type) - {place_name}: types={place_types}", file=sys.stderr, flush=True)
                     continue
 
-                # İsimde "cafe", "coffee", "kahve" varsa ve bar/pub içermiyorsa filtrele
-                is_coffee_name = any(keyword in place_name_lower for keyword in ['cafe', 'coffee', 'kahve', 'kafe'])
-                is_bar_name = any(keyword in place_name_lower for keyword in ['bar', 'pub', 'bira', 'meyhane', 'wine'])
+                # İsimde kahve/kafe/pastane varsa ve bar/pub içermiyorsa filtrele
+                coffee_name_keywords = ['cafe', 'coffee', 'kahve', 'kafe', 'kahveci', 'pastane', 'tatlici',
+                                        'muhallebici', 'dondurma', 'patisserie', 'bakery', 'firin']
+                is_coffee_name = any(keyword in place_name_lower for keyword in coffee_name_keywords)
+                is_bar_name = any(keyword in place_name_lower for keyword in ['bar', 'pub', 'bira', 'meyhane', 'wine', 'cocktail', 'beer'])
                 if is_coffee_name and not is_bar_name:
                     print(f"❌ ALKOL REJECT (isim) - {place_name}: kahve/kafe isimli", file=sys.stderr, flush=True)
                     continue
