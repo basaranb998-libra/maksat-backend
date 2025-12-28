@@ -481,7 +481,7 @@ def get_gm_venues_for_category(category_id: str, category_name: str, city: str, 
                     # Detay bilgisi al
                     details = gmaps.place(
                         place_id,
-                        fields=['name', 'formatted_address', 'rating', 'photos', 'price_level',
+                        fields=['name', 'formatted_address', 'rating', 'photo', 'price_level',
                                 'opening_hours', 'website', 'formatted_phone_number', 'geometry'],
                         language='tr'
                     )
