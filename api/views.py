@@ -9,7 +9,7 @@ import googlemaps
 import google.generativeai as genai
 import urllib.parse
 from .instagram_service import discover_instagram_url
-from .gault_millau_data import enrich_venues_with_gault_millau
+from .gault_millau_data import enrich_venues_with_gault_millau, get_gm_restaurants_for_category as get_static_gm_restaurants
 from .popular_venues_data import enrich_venues_with_instagram
 
 # Türkiye'deki Michelin yıldızlı ve Bib Gourmand restoranlar (2024-2025)
@@ -381,8 +381,9 @@ CATEGORY_NAME_TO_ID = {v: k for k, v in CATEGORY_ID_TO_NAME.items()}
 
 def get_gm_venues_for_category(category_id: str, category_name: str, city: str, exclude_ids: set = None) -> list:
     """
-    Belirli bir kategori için Gault & Millau restoranlarını veritabanından çeker.
-    Sync edilmiş ve aktif olan restoranları döner.
+    Belirli bir kategori için Gault & Millau restoranlarını döner.
+    1. Önce veritabanından sync edilmiş restoranları çeker
+    2. Veritabanında yoksa statik listeden alır ve Google Places ile arar
 
     Args:
         category_id: Kategori ID'si (örn: "24" for Meyhane)
@@ -395,16 +396,16 @@ def get_gm_venues_for_category(category_id: str, category_name: str, city: str, 
     """
     import sys
 
+    venues_data = []
+
     try:
-        # SQLite JSONField'da __contains desteklemediği için
-        # tüm sync edilmiş G&M restoranlarını çekip Python'da filtrele
+        # 1. Önce veritabanından sync edilmiş G&M restoranlarını çek
         gm_venues = GaultMillauVenue.objects.filter(
             is_active=True,
             is_synced=True,
             city__iexact=city
         ).order_by('-toques', 'name')
 
-        venues_data = []
         for gm_venue in gm_venues:
             # Kategori kontrolü - Python tarafında
             if category_id not in (gm_venue.categories or []):
@@ -416,19 +417,137 @@ def get_gm_venues_for_category(category_id: str, category_name: str, city: str, 
             # venue_data varsa kullan
             if gm_venue.venue_data:
                 venue = gm_venue.venue_data.copy()
-                # G&M bilgilerini ekle/güncelle
                 venue['gaultMillauToques'] = gm_venue.toques
                 if gm_venue.award:
                     venue['gaultMillauAward'] = gm_venue.award
                 venues_data.append(venue)
 
         if venues_data:
-            print(f"🏆 G&M - {category_name} kategorisinde {len(venues_data)} G&M restoran bulundu ({city})", file=sys.stderr, flush=True)
+            print(f"🏆 G&M DB - {category_name} kategorisinde {len(venues_data)} G&M restoran bulundu ({city})", file=sys.stderr, flush=True)
+            return venues_data
+
+    except Exception as e:
+        print(f"⚠️ G&M DB sorgusu hatası: {e}", file=sys.stderr, flush=True)
+
+    # 2. Veritabanında yoksa statik listeden al ve Google Places ile ara
+    try:
+        # Şehir mapping (statik listede İstanbul -> Istanbul olarak kayıtlı)
+        city_mapping = {
+            'İstanbul': 'Istanbul',
+            'istanbul': 'Istanbul',
+            'İzmir': 'Izmir',
+            'izmir': 'Izmir',
+            'Ankara': 'Ankara',
+            'ankara': 'Ankara',
+        }
+        normalized_city = city_mapping.get(city, city)
+
+        static_restaurants = get_static_gm_restaurants(category_id, normalized_city)
+
+        if not static_restaurants:
+            print(f"📋 G&M STATİK - {category_name} kategorisinde restoran bulunamadı ({city})", file=sys.stderr, flush=True)
+            return []
+
+        print(f"📋 G&M STATİK - {len(static_restaurants)} restoran bulundu, Google Places ile aranıyor...", file=sys.stderr, flush=True)
+
+        # Google Places API ile ara
+        gmaps = get_gmaps_client()
+        if not gmaps:
+            print(f"⚠️ Google Maps API key eksik", file=sys.stderr, flush=True)
+            return []
+
+        for restaurant in static_restaurants[:5]:  # İlk 5 restoran
+            restaurant_name = restaurant.get('name', '')
+
+            # Exclude kontrolü (isim bazlı)
+            if exclude_ids:
+                skip = False
+                for exc_id in exclude_ids:
+                    if restaurant_name.lower() in str(exc_id).lower():
+                        skip = True
+                        break
+                if skip:
+                    continue
+
+            try:
+                # Google Places ile ara
+                search_query = f"{restaurant_name} restoran {city}"
+                places_result = gmaps.places(query=search_query, language='tr')
+
+                if places_result.get('results'):
+                    place = places_result['results'][0]
+                    place_id = place.get('place_id')
+
+                    # Detay bilgisi al
+                    details = gmaps.place(
+                        place_id,
+                        fields=['name', 'formatted_address', 'rating', 'photos', 'price_level',
+                                'opening_hours', 'website', 'formatted_phone_number', 'geometry'],
+                        language='tr'
+                    )
+                    place_details = details.get('result', {})
+
+                    # Fotoğraf URL'si
+                    photo_url = None
+                    if place_details.get('photos'):
+                        photo_ref = place_details['photos'][0].get('photo_reference')
+                        if photo_ref:
+                            photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference={photo_ref}&key={settings.GOOGLE_MAPS_API_KEY}"
+
+                    # Fiyat seviyesi
+                    price_level = place_details.get('price_level', 2)
+                    price_map = {0: '$', 1: '$', 2: '$$', 3: '$$$', 4: '$$$$'}
+
+                    venue_data = {
+                        'id': place_id,
+                        'name': place_details.get('name', restaurant_name),
+                        'address': place_details.get('formatted_address', ''),
+                        'imageUrl': photo_url or 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4',
+                        'googleRating': place_details.get('rating', 4.5),
+                        'priceRange': price_map.get(price_level, '$$'),
+                        'website': place_details.get('website'),
+                        'phone': place_details.get('formatted_phone_number'),
+                        'gaultMillauToques': restaurant.get('toques', 2),
+                        'gaultMillauAward': restaurant.get('award'),
+                        'instagramUrl': f"https://instagram.com/{restaurant.get('instagram')}" if restaurant.get('instagram') else None,
+                        'vibeTags': ['#GaultMillau', f"#{restaurant.get('toques', 2)}Toque"],
+                        'matchScore': 95,
+                    }
+
+                    venues_data.append(venue_data)
+
+                    # Veritabanına kaydet (arka plan sync için)
+                    try:
+                        GaultMillauVenue.objects.update_or_create(
+                            name=restaurant_name,
+                            defaults={
+                                'place_id': place_id,
+                                'toques': restaurant.get('toques', 2),
+                                'award': restaurant.get('award'),
+                                'chef': restaurant.get('chef'),
+                                'categories': restaurant.get('categories', []),
+                                'city': city,
+                                'venue_data': venue_data,
+                                'instagram': restaurant.get('instagram'),
+                                'is_synced': True,
+                                'is_active': True
+                            }
+                        )
+                        print(f"✅ G&M SYNC - {restaurant_name} veritabanına kaydedildi", file=sys.stderr, flush=True)
+                    except Exception as db_err:
+                        print(f"⚠️ G&M DB kayıt hatası ({restaurant_name}): {db_err}", file=sys.stderr, flush=True)
+
+            except Exception as place_err:
+                print(f"⚠️ G&M Places hatası ({restaurant_name}): {place_err}", file=sys.stderr, flush=True)
+                continue
+
+        if venues_data:
+            print(f"🏆 G&M STATİK->API - {len(venues_data)} restoran bulundu ve sync edildi", file=sys.stderr, flush=True)
 
         return venues_data
 
     except Exception as e:
-        print(f"⚠️ G&M venue sorgusu hatası: {e}", file=sys.stderr, flush=True)
+        print(f"⚠️ G&M statik liste hatası: {e}", file=sys.stderr, flush=True)
         return []
 
 
