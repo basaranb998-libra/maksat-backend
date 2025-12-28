@@ -379,7 +379,7 @@ CATEGORY_ID_TO_NAME = {
 CATEGORY_NAME_TO_ID = {v: k for k, v in CATEGORY_ID_TO_NAME.items()}
 
 
-def get_gm_venues_for_category(category_id: str, category_name: str, city: str, exclude_ids: set = None) -> list:
+def get_gm_venues_for_category(category_id: str, category_name: str, city: str, exclude_ids: set = None, district: str = None) -> list:
     """
     Belirli bir kategori için Gault & Millau restoranlarını döner.
     1. Önce veritabanından sync edilmiş restoranları çeker
@@ -390,6 +390,7 @@ def get_gm_venues_for_category(category_id: str, category_name: str, city: str, 
         category_name: Kategori adı (örn: "Meyhane")
         city: Şehir adı
         exclude_ids: Hariç tutulacak place_id'ler
+        district: İlçe adı (opsiyonel) - adres bazlı filtreleme için
 
     Returns:
         G&M venue_data listesi (sıralanmış - yüksek toque önce)
@@ -417,6 +418,19 @@ def get_gm_venues_for_category(category_id: str, category_name: str, city: str, 
             # venue_data varsa kullan
             if gm_venue.venue_data:
                 venue = gm_venue.venue_data.copy()
+
+                # İlçe kontrolü - adres içinde ilçe adı var mı?
+                if district:
+                    venue_address = venue.get('address', '').lower()
+                    district_lower = district.lower()
+                    # Türkçe karakterleri normalize et
+                    district_normalized = district_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                    address_normalized = venue_address.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+
+                    if district_lower not in venue_address and district_normalized not in address_normalized:
+                        print(f"❌ G&M İLÇE REJECT - {venue.get('name')}: adres '{district}' içermiyor", file=sys.stderr, flush=True)
+                        continue
+
                 venue['gaultMillauToques'] = gm_venue.toques
                 if gm_venue.award:
                     venue['gaultMillauAward'] = gm_venue.award
@@ -498,10 +512,24 @@ def get_gm_venues_for_category(category_id: str, category_name: str, city: str, 
                     price_level = place_details.get('price_level', 2)
                     price_map = {0: '$', 1: '$', 2: '$$', 3: '$$$', 4: '$$$$'}
 
+                    venue_address = place_details.get('formatted_address', '')
+
+                    # İlçe kontrolü - adres içinde ilçe adı var mı?
+                    if district:
+                        address_lower = venue_address.lower()
+                        district_lower = district.lower()
+                        # Türkçe karakterleri normalize et
+                        district_normalized = district_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                        address_normalized = address_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+
+                        if district_lower not in address_lower and district_normalized not in address_normalized:
+                            print(f"❌ G&M İLÇE REJECT - {restaurant_name}: adres '{district}' içermiyor ({venue_address})", file=sys.stderr, flush=True)
+                            continue
+
                     venue_data = {
                         'id': place_id,
                         'name': place_details.get('name', restaurant_name),
-                        'address': place_details.get('formatted_address', ''),
+                        'address': venue_address,
                         'imageUrl': photo_url or 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4',
                         'googleRating': place_details.get('rating', 4.5),
                         'priceRange': price_map.get(price_level, '$$'),
@@ -3057,7 +3085,8 @@ def generate_street_food_places(location, filters, exclude_ids):
         category_id='sokak-lezzeti',
         category_name='Sokak Lezzeti',
         city=city,
-        exclude_ids=exclude_ids_set
+        exclude_ids=exclude_ids_set,
+        district=selected_district  # İlçe filtresi
     )
     if gm_venues:
         print(f"🏆 G&M - Sokak Lezzeti kategorisinde {len(gm_venues)} G&M restoran bulundu ({city})", file=sys.stderr, flush=True)
@@ -4324,6 +4353,10 @@ def generate_venues(request):
         # Load More kontrolü için orijinal exclude_ids'i sakla (G&M ID'leri eklemeden önce)
         original_exclude_ids = exclude_ids.copy() if exclude_ids else set()
 
+        # İlçe bilgisini al (G&M filtresi için)
+        districts = location.get('districts', [])
+        selected_district_for_gm = districts[0] if districts else None
+
         # G&M desteği olan kategoriler (mapping'de tanımlı olanlar)
         if category_id in CATEGORY_ID_TO_NAME or category_name in CATEGORY_NAME_TO_ID:
             # Kategori ID yoksa adından bul
@@ -4334,7 +4367,8 @@ def generate_venues(request):
                 category_id=category_id,
                 category_name=category_name,
                 city=city,
-                exclude_ids=exclude_ids
+                exclude_ids=exclude_ids,
+                district=selected_district_for_gm  # İlçe filtresi
             )
 
             # G&M restoranları varsa bunları öncelikli olarak döndür
