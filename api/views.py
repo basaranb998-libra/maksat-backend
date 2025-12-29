@@ -3604,6 +3604,305 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
         )
 
 
+def generate_specialty_coffee_places(location, filters, exclude_ids):
+    """3. Nesil Kahveci kategorisi için çoklu sorgu - farklı specialty coffee terimleriyle arama yaparak çeşitlilik sağla
+    Gemini ile practicalInfo, atmosphereSummary ve enriched description eklenir.
+    """
+    import json
+    import sys
+    import requests
+    import re
+
+    gmaps = get_gmaps_client()
+    city = location['city']
+    districts = location.get('districts', [])
+    neighborhoods = location.get('neighborhoods', [])
+    selected_district = districts[0] if districts else None
+    selected_neighborhood = neighborhoods[0] if neighborhoods else None
+
+    # ===== G&M VENUE'LARI ÖNCELİKLİ OLARAK ÇEK =====
+    exclude_ids_set = set(exclude_ids) if exclude_ids else set()
+    gm_venues = get_gm_venues_for_category(
+        category_id='23',
+        category_name='3. Nesil Kahveci',
+        city=city,
+        exclude_ids=exclude_ids_set,
+        district=selected_district
+    )
+    if gm_venues:
+        print(f"🏆 G&M - 3. Nesil Kahveci kategorisinde {len(gm_venues)} G&M mekan bulundu ({city})", file=sys.stderr, flush=True)
+        gm_place_ids = {v.get('id') for v in gm_venues if v.get('id')}
+        exclude_ids_set = exclude_ids_set | gm_place_ids
+
+    # ===== HYBRID CACHE SİSTEMİ =====
+    cached_venues, all_cached_ids = get_cached_venues_for_hybrid(
+        category_name='3. Nesil Kahveci',
+        city=city,
+        district=selected_district,
+        neighborhood=selected_neighborhood,
+        exclude_ids=exclude_ids_set,
+        limit=CACHE_VENUES_LIMIT
+    )
+    api_exclude_ids = exclude_ids_set | all_cached_ids
+    print(f"🔀 HYBRID - 3. Nesil Kahveci Cache: {len(cached_venues)}, API exclude: {len(api_exclude_ids)}", file=sys.stderr, flush=True)
+
+    # Lokasyon string'i oluştur
+    if selected_neighborhood:
+        search_location = f"{selected_neighborhood}, {selected_district}, {city}"
+    elif selected_district:
+        search_location = f"{selected_district}, {city}"
+    else:
+        search_location = city
+
+    print(f"☕ 3. Nesil Kahveci (Multi-Query): {search_location}", file=sys.stderr, flush=True)
+
+    # Her specialty coffee türü için ayrı sorgu - çeşitlilik sağlamak için
+    specialty_coffee_queries = [
+        ('specialty coffee', 'Specialty'),
+        ('third wave coffee', 'Third Wave'),
+        ('coffee roastery', 'Roastery'),
+        ('artisan coffee', 'Artisan'),
+        ('butik kahveci', 'Butik'),
+        ('filter coffee', 'Filter'),
+        ('pour over coffee', 'Pour Over'),
+    ]
+
+    venues = []
+    added_ids = set()
+
+    try:
+        for query_term, coffee_type in specialty_coffee_queries:
+            try:
+                url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+                params = {
+                    "query": f"{query_term} in {search_location}, Turkey",
+                    "language": "tr",
+                    "key": settings.GOOGLE_MAPS_API_KEY
+                }
+
+                print(f"🔍 Sorgu: {query_term} in {search_location}", file=sys.stderr, flush=True)
+
+                response = requests.get(url, params=params)
+
+                if response.status_code != 200:
+                    print(f"⚠️ API hatası ({query_term}): {response.status_code}", file=sys.stderr, flush=True)
+                    continue
+
+                places_data = response.json()
+                places = places_data.get('results', [])
+
+                for place in places:
+                    place_id = place.get('place_id', '')
+                    place_name = place.get('name', '')
+                    place_address = place.get('formatted_address', '')
+                    place_rating = place.get('rating', 0)
+                    place_review_count = place.get('user_ratings_total', 0)
+                    place_types = place.get('types', [])
+
+                    # Daha önce eklendiyse atla
+                    if place_id in added_ids:
+                        continue
+
+                    # Exclude IDs kontrolü
+                    if place_id in exclude_ids_set:
+                        print(f"⏭️ EXCLUDE - {place_name}: zaten gösterildi", file=sys.stderr, flush=True)
+                        continue
+
+                    # Rating filtresi - 4.0 ve üzeri (kahveciler için daha düşük)
+                    if place_rating < 4.0:
+                        print(f"❌ RATING REJECT - {place_name}: {place_rating} < 4.0", file=sys.stderr, flush=True)
+                        continue
+
+                    # Review count filtresi - minimum 10
+                    if place_review_count < 10:
+                        print(f"❌ REVIEW COUNT REJECT - {place_name}: {place_review_count} < 10", file=sys.stderr, flush=True)
+                        continue
+
+                    # İlçe kontrolü
+                    if selected_district:
+                        address_lower = place_address.lower()
+                        district_lower = selected_district.lower()
+                        district_normalized = district_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                        address_normalized = address_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+
+                        if district_lower not in address_lower and district_normalized not in address_normalized:
+                            print(f"❌ İLÇE REJECT - {place_name}: {selected_district} içermiyor", file=sys.stderr, flush=True)
+                            continue
+
+                    # Starbucks, zincir kahveciler filtresi - bunları dahil etme
+                    place_name_lower = place_name.lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                    chain_keywords = ['starbucks', 'kahve dunyasi', 'tchibo', 'gloria jeans', 'caribou', 'costa coffee', 'dunkin', 'mcdonald', 'burger king']
+
+                    if any(k in place_name_lower for k in chain_keywords):
+                        print(f"❌ CHAIN REJECT - {place_name}", file=sys.stderr, flush=True)
+                        continue
+
+                    # Fotoğraf URL'si (Legacy API)
+                    photo_url = None
+                    if place.get('photos') and len(place['photos']) > 0:
+                        photo_ref = place['photos'][0].get('photo_reference', '')
+                        if photo_ref:
+                            photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference={photo_ref}&key={settings.GOOGLE_MAPS_API_KEY}"
+
+                    # Google Maps URL
+                    maps_query = urllib.parse.quote(f"{place_name} {place_address}")
+                    google_maps_url = f"https://www.google.com/maps/search/?api=1&query={maps_query}"
+
+                    # Fiyat aralığı
+                    price_level = place.get('price_level', 2)
+                    price_map = {0: '$', 1: '$', 2: '$$', 3: '$$$', 4: '$$$$'}
+                    price_range = price_map.get(price_level, '$$')
+
+                    # Place Details API ile yorumları ve ek bilgileri çek
+                    place_details = get_place_details_extended(gmaps, place_id) if gmaps and place_id else {'reviews': [], 'foodServices': {}}
+                    google_reviews = place_details.get('reviews', [])
+
+                    venue = {
+                        'id': place_id,
+                        'name': place_name,
+                        'tagline': f'{coffee_type} Coffee',
+                        'description': f'{place_name} - Nitelikli kahve deneyimi sunan özel kahveci.',
+                        'address': place_address,
+                        'priceRange': price_range,
+                        'imageUrl': photo_url,
+                        'googleMapsUrl': google_maps_url,
+                        'googleRating': place_rating,
+                        'googleReviewCount': place_review_count,
+                        'coffeeType': coffee_type,
+                        'googleReviews': google_reviews,
+                        'category': '3. Nesil Kahveci',
+                        'matchScore': 85,
+                        'noiseLevel': 'Sakin',
+                        'vibeTags': ['#SpecialtyCoffee', '#ThirdWave', '#Kahveci'],
+                    }
+
+                    venues.append(venue)
+                    added_ids.add(place_id)
+                    print(f"✅ Added: {place_name} ({coffee_type}) - {len(google_reviews)} reviews", file=sys.stderr, flush=True)
+
+                    # Her sorgu türünden en fazla 3 mekan al
+                    if len([v for v in venues if v.get('coffeeType') == coffee_type]) >= 3:
+                        break
+
+            except Exception as e:
+                print(f"⚠️ Query error ({query_term}): {e}", file=sys.stderr, flush=True)
+                continue
+
+        print(f"☕ 3. Nesil Kahveci toplamda {len(venues)} mekan bulundu", file=sys.stderr, flush=True)
+
+        # ===== GEMİNİ İLE ZENGİNLEŞTİRME =====
+        if venues:
+            try:
+                venue_names = [v['name'] for v in venues[:10]]
+                gemini_prompt = f"""Sen bir specialty coffee uzmanısın. Aşağıdaki kahveciler için detaylı Türkçe bilgiler ver.
+
+Kahveciler: {', '.join(venue_names)}
+Şehir: {city}
+
+Her kahveci için JSON formatında şu bilgileri ver:
+{{
+  "name": "Mekan adı",
+  "description": "Kahveci hakkında kısa açıklama (max 150 karakter)",
+  "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
+  "practicalInfo": {{
+    "mustTry": "Mutlaka denenmesi gereken içecek/yiyecek",
+    "headsUp": "Dikkat edilmesi gereken bir şey varsa (yoksa null)"
+  }},
+  "atmosphereSummary": {{
+    "noiseLevel": "Sessiz/Sakin/Canlı/Gürültülü",
+    "lighting": "Loş/Yumuşak/Aydınlık",
+    "privacy": "Mahrem/Yarı Açık/Açık Alan",
+    "energy": "Dingin/Dengeli/Enerjik",
+    "idealFor": ["kahve molası", "çalışma", "arkadaş buluşması"],
+    "notIdealFor": ["iş yemeği", "aile yemeği"],
+    "oneLiner": "Tek cümlelik atmosfer özeti"
+  }}
+}}
+
+Kahveci için uygun vibeTags örnekleri: #SpecialtyCoffee, #V60, #Chemex, #FilterKahve, #Espresso, #LatteSanatı, #KahveMolası, #ÇalışmaDostu, #SakinOrtam, #KitapKahve
+
+SADECE JSON ARRAY döndür, başka açıklama yazma."""
+
+                model = get_genai_model()
+                if model:
+                    gemini_response = model.generate_content(gemini_prompt)
+                    response_text = gemini_response.text.strip()
+
+                    # JSON parse
+                    response_text = re.sub(r'```json\s*|\s*```', '', response_text)
+                    response_text = response_text.strip()
+
+                    try:
+                        ai_results = json.loads(response_text)
+                    except json.JSONDecodeError:
+                        match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                        if match:
+                            ai_results = json.loads(match.group())
+                        else:
+                            print(f"⚠️ 3. Nesil Kahveci JSON parse edilemedi", file=sys.stderr, flush=True)
+                            ai_results = []
+
+                    # AI sonuçlarını mekanlarla eşleştir
+                    ai_by_name = {r.get('name', '').lower(): r for r in ai_results}
+
+                    for venue in venues:
+                        ai_data = ai_by_name.get(venue['name'].lower(), {})
+                        if ai_data:
+                            venue['description'] = ai_data.get('description', venue.get('description', ''))
+                            venue['vibeTags'] = ai_data.get('vibeTags', venue.get('vibeTags', []))
+                            venue['practicalInfo'] = ai_data.get('practicalInfo', {})
+                            venue['atmosphereSummary'] = ai_data.get('atmosphereSummary', {})
+
+                    print(f"✅ Gemini enrichment completed for {len(venues)} venues", file=sys.stderr, flush=True)
+
+            except Exception as e:
+                print(f"⚠️ Gemini enrichment error: {e}", file=sys.stderr, flush=True)
+
+        # ===== CACHE'E KAYDET =====
+        if venues:
+            save_venues_to_cache(
+                venues=venues,
+                category_name='3. Nesil Kahveci',
+                city=city,
+                district=selected_district,
+                neighborhood=selected_neighborhood
+            )
+
+        # ===== HYBRID: G&M + CACHE + API VENUE'LARINI BİRLEŞTİR =====
+        combined_venues = []
+        existing_ids = set()
+
+        # 1. Önce G&M venue'larını ekle
+        for gv in gm_venues:
+            if len(combined_venues) < 10:
+                combined_venues.append(gv)
+                existing_ids.add(gv.get('id'))
+
+        # 2. Sonra cache'ten gelenleri ekle
+        for cv in cached_venues:
+            if len(combined_venues) < 10 and cv.get('id') not in existing_ids:
+                combined_venues.append(cv)
+                existing_ids.add(cv.get('id'))
+
+        # 3. Son olarak API'den gelenleri ekle
+        for av in venues:
+            if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+                combined_venues.append(av)
+                existing_ids.add(av.get('id'))
+
+        print(f"🔀 HYBRID RESULT - 3. Nesil Kahveci G&M: {len(gm_venues)}, Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
+        return Response(combined_venues, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"❌ Specialty coffee generation error: {e}", file=sys.stderr, flush=True)
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
+        return Response(
+            {'error': f'Specialty coffee mekanları getirilirken hata: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 def generate_party_venues(location, filters, exclude_ids):
     """Eğlence & Parti kategorisi için çoklu sorgu - her mekan türü için ayrı arama yaparak çeşitlilik sağla
     Gemini ile practicalInfo, atmosphereSummary ve enriched description eklenir.
@@ -4433,6 +4732,10 @@ def generate_venues(request):
         # Eğlence & Parti kategorisi için özel işlem - çoklu sorgu
         if category['name'] == 'Eğlence & Parti':
             return generate_party_venues(location, filters, exclude_ids)
+
+        # 3. Nesil Kahveci kategorisi için özel işlem - çoklu sorgu
+        if category['name'] == '3. Nesil Kahveci':
+            return generate_specialty_coffee_places(location, filters, exclude_ids)
 
         # ===== GAULT & MILLAU ÖNCELİKLİ SORGU =====
         # Önce bu kategori için G&M restoranları var mı kontrol et
