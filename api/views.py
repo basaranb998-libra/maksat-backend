@@ -128,6 +128,39 @@ def health_check(request):
     return Response({'status': 'ok'}, status=status.HTTP_200_OK)
 
 
+# Instagram suggestion endpoint
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def suggest_instagram(request):
+    """
+    Kullanıcıdan gelen Instagram öneri/düzeltmelerini kaydet.
+    Bu veriler daha sonra manuel olarak doğrulanıp popular_venues_data.py'ye eklenebilir.
+    """
+    import sys
+
+    venue_id = request.data.get('venueId', '')
+    venue_name = request.data.get('venueName', '')
+    suggested_instagram = request.data.get('suggestedInstagram', '')
+
+    if not suggested_instagram:
+        return Response({'error': 'Instagram kullanıcı adı gerekli'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Öneriyi logla (daha sonra veritabanına kaydedilebilir)
+    print(f"📸 INSTAGRAM ÖNERİSİ:", file=sys.stderr, flush=True)
+    print(f"   Mekan: {venue_name} (ID: {venue_id})", file=sys.stderr, flush=True)
+    print(f"   Önerilen: @{suggested_instagram}", file=sys.stderr, flush=True)
+    print(f"   URL: https://instagram.com/{suggested_instagram}", file=sys.stderr, flush=True)
+
+    # İleride: InstagramSuggestion modeline kaydet
+    # InstagramSuggestion.objects.create(
+    #     venue_id=venue_id,
+    #     venue_name=venue_name,
+    #     suggested_instagram=suggested_instagram
+    # )
+
+    return Response({'success': True, 'message': 'Öneri kaydedildi'}, status=status.HTTP_200_OK)
+
+
 # ===== SHORTLINK ENDPOINTS =====
 import secrets
 from .models import ShortLink
@@ -3802,6 +3835,7 @@ Kahveciler: {', '.join(venue_names)}
 Her kahveci için JSON formatında şu bilgileri ver:
 {{
   "name": "Mekan adı",
+  "instagramUsername": "Instagram kullanıcı adı (@ olmadan, bilmiyorsan null)",
   "description": "Kahveci hakkında kısa açıklama (max 150 karakter)",
   "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
   "practicalInfo": {{
@@ -3820,6 +3854,8 @@ Her kahveci için JSON formatında şu bilgileri ver:
 }}
 
 Kahveci için uygun vibeTags örnekleri: #SpecialtyCoffee, #V60, #Chemex, #FilterKahve, #Espresso, #LatteSanatı, #KahveMolası, #ÇalışmaDostu, #SakinOrtam, #KitapKahve
+
+ÖNEMLİ: Instagram kullanıcı adını biliyorsan yaz (örn: "kronotropcoffee", "petraroastingco"), bilmiyorsan null yaz.
 
 SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
@@ -3852,6 +3888,35 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                             venue['vibeTags'] = ai_data.get('vibeTags', venue.get('vibeTags', []))
                             venue['practicalInfo'] = ai_data.get('practicalInfo', {})
                             venue['atmosphereSummary'] = ai_data.get('atmosphereSummary', {})
+                            # Instagram username'i ekle
+                            instagram_username = ai_data.get('instagramUsername')
+                            if instagram_username and instagram_username != 'null' and instagram_username is not None:
+                                venue['instagramUrl'] = f"https://instagram.com/{instagram_username}"
+                                venue['instagramEstimated'] = False  # Gemini buldu, doğrulanmış
+
+                    # Gemini Instagram bulamadıysa, mekan adından tahmin et (şehir eklemeden)
+                    from .instagram_service import generate_username_variants
+                    for venue in venues:
+                        if not venue.get('instagramUrl'):
+                            variants = generate_username_variants(venue['name'])  # Şehir yok
+                            if variants:
+                                # En iyi varyantı seç: özel karaktersiz, prefix'siz, en uzun
+                                best_variant = None
+                                # Önce temiz olanları filtrele (nokta, alt çizgi, the, official, tr yok)
+                                clean_variants = [v for v in variants if
+                                    '.' not in v and '_' not in v and
+                                    not v.startswith('the') and
+                                    'official' not in v and
+                                    not v.endswith('tr')]
+                                # Temizlerden en uzunu
+                                if clean_variants:
+                                    best_variant = max(clean_variants, key=len)
+                                else:
+                                    # Temiz yoksa en uzun varyant
+                                    best_variant = max(variants, key=len)
+                                venue['instagramUrl'] = f"https://instagram.com/{best_variant}"
+                                venue['instagramEstimated'] = True  # Tahmin edilen, kullanıcı düzeltebilir
+                                print(f"📸 Instagram fallback: {venue['name']} -> {best_variant}", file=sys.stderr, flush=True)
 
                     print(f"✅ Gemini enrichment completed for {len(venues)} venues", file=sys.stderr, flush=True)
 

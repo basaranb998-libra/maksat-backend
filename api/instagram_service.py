@@ -90,10 +90,15 @@ def generate_username_variants(venue_name: str, city: str = None) -> List[str]:
     if not core_words:
         core_words = words[:2]  # En az 2 kelime al
 
-    # Temel username (tüm kelimeler birleşik)
+    # Temel username (tüm kelimeler birleşik - filtrelenmiş)
     base_username = ''.join(core_words)
     if len(base_username) >= 3:
         variants.append(base_username)
+
+    # Tüm kelimeler birleşik (FİLTRESİZ - coffee, roasting vs dahil)
+    full_username = ''.join(words)
+    if len(full_username) >= 3 and full_username != base_username:
+        variants.append(full_username)
 
     # İlk kelime (genellikle mekan adı)
     if core_words:

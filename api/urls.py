@@ -26,6 +26,7 @@ urlpatterns = [
     path('venues/generate/', views.generate_venues, name='generate-venues'),
     path('venues/search/', views.search_venues, name='search-venues'),
     path('venues/similar/', views.get_similar_venues, name='similar-venues'),
+    path('venues/suggest-instagram/', views.suggest_instagram, name='suggest-instagram'),
 
     # Shortlink endpoints
     path('shortlink/', views.create_shortlink, name='create-shortlink'),
