@@ -3559,6 +3559,7 @@ Her mekan için analiz yap ve JSON döndür:
   "name": "Mekan Adı",
   "description": "2 cümle Türkçe - mekanın öne çıkan özelliği, imza lezzeti",
   "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
+  "instagramUsername": "kullanici_adi" | null,
   "practicalInfo": {{
     "reservationNeeded": null,
     "crowdLevel": "Sakin" | "Orta" | "Kalabalık" | null,
@@ -3604,6 +3605,12 @@ atmosphereSummary Kuralları:
 - idealFor: Max 3 - "hızlı öğün", "gece atıştırmalığı", "arkadaş buluşması", "ekonomik yemek"
 - notIdealFor: Max 2 - "romantik akşam", "iş yemeği", "özel gün"
 - oneLiner: Tek cümle atmosfer özeti
+
+instagramUsername Kuralları:
+- Mekanın resmi Instagram hesabını bul (@ işareti olmadan sadece kullanıcı adı)
+- Türkiye'deki mekanların Instagram'ı genellikle mekan_ismi, mekanadi, mekanismi_sehir formatındadır
+- Örnek: "Şampiyon Kokoreç" → "sampiyonkokorec" veya "sampiyon_kokorec"
+- Bilinen popüler mekanların Instagram'ını ver. Emin olmadığın için null yaz.
 
 SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
@@ -3665,7 +3672,33 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                                 'oneLiner': 'Sokak lezzeti deneyimi sunan popüler bir mekan.'
                             })
                         }
+
+                        # Instagram username'i ekle (Gemini'dan)
+                        instagram_username = ai_data.get('instagramUsername')
+                        if instagram_username and instagram_username != 'null' and instagram_username is not None:
+                            venue['instagramUrl'] = f"https://instagram.com/{instagram_username}"
+                            venue['instagramEstimated'] = False  # Gemini buldu, doğrulanmış
+
                         final_venues.append(venue)
+
+                    # Gemini Instagram bulamadıysa, mekan adından tahmin et
+                    for venue in final_venues:
+                        if not venue.get('instagramUrl'):
+                            variants = generate_username_variants(venue['name'])
+                            if variants:
+                                # En iyi varyantı seç: özel karaktersiz, prefix'siz, en uzun
+                                clean_variants = [v for v in variants if
+                                    '.' not in v and '_' not in v and
+                                    not v.startswith('the') and
+                                    'official' not in v and
+                                    not v.endswith('tr')]
+                                if clean_variants:
+                                    best_variant = max(clean_variants, key=len)
+                                else:
+                                    best_variant = max(variants, key=len)
+                                venue['instagramUrl'] = f"https://instagram.com/{best_variant}"
+                                venue['instagramEstimated'] = True  # Tahmin edilen
+                                print(f"📸 Sokak Lezzeti Instagram fallback: {venue['name']} -> {best_variant}", file=sys.stderr, flush=True)
 
                     print(f"✅ Gemini ile {len(final_venues)} Sokak Lezzeti mekan zenginleştirildi", file=sys.stderr, flush=True)
 
@@ -4546,6 +4579,7 @@ Her mekan için analiz yap ve JSON döndür:
   "name": "Mekan Adı",
   "description": "2 cümle Türkçe - mekanın parti atmosferi, DJ/müzik tarzı",
   "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
+  "instagramUsername": "kullanici_adi" | null,
   "practicalInfo": {{
     "reservationNeeded": "Tavsiye Edilir" | "Şart" | "Gerekli Değil" | null,
     "crowdLevel": "Sakin" | "Orta" | "Kalabalık" | null,
@@ -4589,6 +4623,12 @@ atmosphereSummary Kuralları:
 - idealFor: Max 3 - "parti gecesi", "dans", "arkadaş grubu", "bekarlığa veda", "DJ gecesi"
 - notIdealFor: Max 2 - "romantik akşam", "sessiz sohbet", "aile yemeği"
 - oneLiner: Tek cümle atmosfer özeti
+
+instagramUsername Kuralları:
+- Mekanın resmi Instagram hesabını bul (@ işareti olmadan sadece kullanıcı adı)
+- Gece kulüpleri genellikle: mekanadi, mekan_official, mekanistanbul formatında
+- Örnek: "Sortie" → "sortieistanbul" veya "sortie_official"
+- Bilinen popüler mekanların Instagram'ını ver. Emin olmadığın için null yaz.
 
 SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
@@ -4651,7 +4691,33 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                                 'oneLiner': 'Enerjik parti atmosferi sunan popüler bir mekan.'
                             })
                         }
+
+                        # Instagram username'i ekle (Gemini'dan)
+                        instagram_username = ai_data.get('instagramUsername')
+                        if instagram_username and instagram_username != 'null' and instagram_username is not None:
+                            venue['instagramUrl'] = f"https://instagram.com/{instagram_username}"
+                            venue['instagramEstimated'] = False  # Gemini buldu, doğrulanmış
+
                         final_venues.append(venue)
+
+                    # Gemini Instagram bulamadıysa, mekan adından tahmin et
+                    for venue in final_venues:
+                        if not venue.get('instagramUrl'):
+                            variants = generate_username_variants(venue['name'])
+                            if variants:
+                                # En iyi varyantı seç: özel karaktersiz, prefix'siz, en uzun
+                                clean_variants = [v for v in variants if
+                                    '.' not in v and '_' not in v and
+                                    not v.startswith('the') and
+                                    'official' not in v and
+                                    not v.endswith('tr')]
+                                if clean_variants:
+                                    best_variant = max(clean_variants, key=len)
+                                else:
+                                    best_variant = max(variants, key=len)
+                                venue['instagramUrl'] = f"https://instagram.com/{best_variant}"
+                                venue['instagramEstimated'] = True  # Tahmin edilen
+                                print(f"📸 Eğlence & Parti Instagram fallback: {venue['name']} -> {best_variant}", file=sys.stderr, flush=True)
 
                     print(f"✅ Gemini ile {len(final_venues)} Eğlence & Parti mekan zenginleştirildi", file=sys.stderr, flush=True)
 
