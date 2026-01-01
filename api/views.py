@@ -246,9 +246,12 @@ def cache_clear_invalid(request):
     # NOT: "el değiştir" kaldırıldı - el değiştirmek kapanmak anlamına gelmiyor
     closed_keywords = [
         'kalıcı olarak kapan', 'kalici olarak kapan',
+        'kalıcı olarak kapatıl', 'kalici olarak kapatil',
         'artık kapalı', 'artik kapali',
         'kapandı', 'kapandi',
         'kapanmış', 'kapanmis',
+        'kapatıldı', 'kapatildi',
+        'kapatılmış', 'kapatilmis',
         'permanently closed', 'closed permanently',
         'yeni işletme', 'yeni isletme',
         'isim değişti', 'isim degisti',
@@ -1586,8 +1589,9 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
 
                 # ===== KAPANMIŞ MEKAN KONTROLÜ (YORUM İÇERİĞİ) =====
                 if google_reviews:
-                    closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'artık kapalı', 'artik kapali',
-                                      'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
+                    closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'kapatıldı', 'kapatildi', 'kapatılmış', 'kapatilmis',
+                                      'kalıcı olarak kapan', 'kalici olarak kapan', 'kalıcı olarak kapatıl', 'kalici olarak kapatil',
+                                      'artık kapalı', 'artik kapali', 'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
                     is_closed = False
                     for review in google_reviews[:5]:
                         review_text = review.get('text', '').lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
@@ -3030,8 +3034,9 @@ def generate_bar_venues(location, filters, exclude_ids):
 
                     # ===== KAPANMIŞ MEKAN KONTROLÜ (YORUM İÇERİĞİ) =====
                     if google_reviews:
-                        closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'artık kapalı', 'artik kapali',
-                                          'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
+                        closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'kapatıldı', 'kapatildi', 'kapatılmış', 'kapatilmis',
+                                          'kalıcı olarak kapan', 'kalici olarak kapan', 'kalıcı olarak kapatıl', 'kalici olarak kapatil',
+                                          'artık kapalı', 'artik kapali', 'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
                         is_closed = False
                         for review in google_reviews[:5]:
                             review_text = review.get('text', '').lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
@@ -3453,8 +3458,9 @@ def generate_street_food_places(location, filters, exclude_ids):
 
                     # ===== KAPANMIŞ MEKAN KONTROLÜ (YORUM İÇERİĞİ) =====
                     if google_reviews:
-                        closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'artık kapalı', 'artik kapali',
-                                          'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
+                        closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'kapatıldı', 'kapatildi', 'kapatılmış', 'kapatilmis',
+                                          'kalıcı olarak kapan', 'kalici olarak kapan', 'kalıcı olarak kapatıl', 'kalici olarak kapatil',
+                                          'artık kapalı', 'artik kapali', 'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
                         is_closed = False
                         for review in google_reviews[:5]:
                             review_text = review.get('text', '').lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
@@ -3923,8 +3929,9 @@ def generate_specialty_coffee_places(location, filters, exclude_ids):
 
                     # ===== KAPANMIŞ MEKAN KONTROLÜ (YORUM İÇERİĞİ) =====
                     if google_reviews:
-                        closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'artık kapalı', 'artik kapali',
-                                          'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
+                        closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'kapatıldı', 'kapatildi', 'kapatılmış', 'kapatilmis',
+                                          'kalıcı olarak kapan', 'kalici olarak kapan', 'kalıcı olarak kapatıl', 'kalici olarak kapatil',
+                                          'artık kapalı', 'artik kapali', 'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
                         is_closed = False
                         for review in google_reviews[:5]:
                             review_text = review.get('text', '').lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
@@ -4412,8 +4419,9 @@ def generate_party_venues(location, filters, exclude_ids):
 
                     # ===== KAPANMIŞ MEKAN KONTROLÜ (YORUM İÇERİĞİ) =====
                     if google_reviews:
-                        closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'artık kapalı', 'artik kapali',
-                                          'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
+                        closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'kapatıldı', 'kapatildi', 'kapatılmış', 'kapatilmis',
+                                          'kalıcı olarak kapan', 'kalici olarak kapan', 'kalıcı olarak kapatıl', 'kalici olarak kapatil',
+                                          'artık kapalı', 'artik kapali', 'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
                         is_closed = False
                         for review in google_reviews[:5]:
                             review_text = review.get('text', '').lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
@@ -5687,9 +5695,12 @@ def generate_venues(request):
             if google_reviews:
                 closed_keywords = [
                     'kalıcı olarak kapan', 'kalici olarak kapan',
+                    'kalıcı olarak kapatıl', 'kalici olarak kapatil',
                     'artık kapalı', 'artik kapali',
                     'kapandı', 'kapandi',
                     'kapanmış', 'kapanmis',
+                    'kapatıldı', 'kapatildi',
+                    'kapatılmış', 'kapatilmis',
                     'permanently closed', 'closed permanently',
                     'yeni işletme', 'yeni isletme',
                     'isim değişti', 'isim degisti',
