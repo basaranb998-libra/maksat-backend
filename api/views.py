@@ -434,7 +434,8 @@ def get_place_details_extended(gmaps, place_id: str, max_reviews: int = 5) -> di
                     'rating': review.get('rating', 5),
                     'text': review.get('text', ''),
                     'relativeTime': review.get('relative_time_description', ''),
-                    'profilePhotoUrl': review.get('profile_photo_url', '')
+                    'profilePhotoUrl': review.get('profile_photo_url', ''),
+                    'time': review.get('time')  # UNIX timestamp for stale review check
                 })
 
         # Yemek servis bilgilerini parse et
@@ -1563,6 +1564,42 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
                 # Place Details ile yorumları al
                 place_id = place.get('place_id')
                 google_reviews = get_place_reviews(gmaps, place_id) if place_id else []
+                place_review_count = place.get('user_ratings_total', 0)
+
+                # ===== ESKİ YORUM KONTROLÜ =====
+                if place_review_count < 50 and google_reviews:
+                    from datetime import datetime, timedelta
+                    seven_months_ago = datetime.now() - timedelta(days=210)
+                    latest_review_time = None
+                    for review in google_reviews:
+                        review_timestamp = review.get('time')
+                        if review_timestamp:
+                            try:
+                                review_time = datetime.fromtimestamp(review_timestamp)
+                                if latest_review_time is None or review_time > latest_review_time:
+                                    latest_review_time = review_time
+                            except:
+                                pass
+                    if latest_review_time and latest_review_time < seven_months_ago:
+                        print(f"❌ ESKİ YORUM REJECT - {place_name}: son yorum {latest_review_time.strftime('%Y-%m-%d')}", file=sys.stderr, flush=True)
+                        continue
+
+                # ===== KAPANMIŞ MEKAN KONTROLÜ (YORUM İÇERİĞİ) =====
+                if google_reviews:
+                    closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'artık kapalı', 'artik kapali',
+                                      'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
+                    is_closed = False
+                    for review in google_reviews[:5]:
+                        review_text = review.get('text', '').lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                        for kw in closed_keywords:
+                            if kw.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u') in review_text:
+                                is_closed = True
+                                print(f"❌ KAPANMIŞ MEKAN REJECT - {place_name}: yorumda '{kw}' bulundu", file=sys.stderr, flush=True)
+                                break
+                        if is_closed:
+                            break
+                    if is_closed:
+                        continue
 
                 opening_hours = place.get('opening_hours', {})
 
@@ -2973,6 +3010,41 @@ def generate_bar_venues(location, filters, exclude_ids):
                     # Place Details ile yorumları al
                     google_reviews = get_place_reviews(gmaps, place_id) if place_id else []
 
+                    # ===== ESKİ YORUM KONTROLÜ =====
+                    if place_review_count < 50 and google_reviews:
+                        from datetime import datetime, timedelta
+                        seven_months_ago = datetime.now() - timedelta(days=210)
+                        latest_review_time = None
+                        for review in google_reviews:
+                            review_timestamp = review.get('time')
+                            if review_timestamp:
+                                try:
+                                    review_time = datetime.fromtimestamp(review_timestamp)
+                                    if latest_review_time is None or review_time > latest_review_time:
+                                        latest_review_time = review_time
+                                except:
+                                    pass
+                        if latest_review_time and latest_review_time < seven_months_ago:
+                            print(f"❌ ESKİ YORUM REJECT - {place_name}: son yorum {latest_review_time.strftime('%Y-%m-%d')}", file=sys.stderr, flush=True)
+                            continue
+
+                    # ===== KAPANMIŞ MEKAN KONTROLÜ (YORUM İÇERİĞİ) =====
+                    if google_reviews:
+                        closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'artık kapalı', 'artik kapali',
+                                          'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
+                        is_closed = False
+                        for review in google_reviews[:5]:
+                            review_text = review.get('text', '').lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                            for kw in closed_keywords:
+                                if kw.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u') in review_text:
+                                    is_closed = True
+                                    print(f"❌ KAPANMIŞ MEKAN REJECT - {place_name}: yorumda '{kw}' bulundu", file=sys.stderr, flush=True)
+                                    break
+                            if is_closed:
+                                break
+                        if is_closed:
+                            continue
+
                     # Vibe tags
                     vibe_tags = ['#İşÇıkışı', f'#{bar_type.replace(" ", "").replace("/", "")}', '#AfterWork']
 
@@ -3360,6 +3432,41 @@ def generate_street_food_places(location, filters, exclude_ids):
 
                     # Place Details ile yorumları al
                     google_reviews = get_place_reviews(gmaps, place_id) if place_id else []
+
+                    # ===== ESKİ YORUM KONTROLÜ =====
+                    if place_review_count < 50 and google_reviews:
+                        from datetime import datetime, timedelta
+                        seven_months_ago = datetime.now() - timedelta(days=210)
+                        latest_review_time = None
+                        for review in google_reviews:
+                            review_timestamp = review.get('time')
+                            if review_timestamp:
+                                try:
+                                    review_time = datetime.fromtimestamp(review_timestamp)
+                                    if latest_review_time is None or review_time > latest_review_time:
+                                        latest_review_time = review_time
+                                except:
+                                    pass
+                        if latest_review_time and latest_review_time < seven_months_ago:
+                            print(f"❌ ESKİ YORUM REJECT - {place_name}: son yorum {latest_review_time.strftime('%Y-%m-%d')}", file=sys.stderr, flush=True)
+                            continue
+
+                    # ===== KAPANMIŞ MEKAN KONTROLÜ (YORUM İÇERİĞİ) =====
+                    if google_reviews:
+                        closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'artık kapalı', 'artik kapali',
+                                          'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
+                        is_closed = False
+                        for review in google_reviews[:5]:
+                            review_text = review.get('text', '').lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                            for kw in closed_keywords:
+                                if kw.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u') in review_text:
+                                    is_closed = True
+                                    print(f"❌ KAPANMIŞ MEKAN REJECT - {place_name}: yorumda '{kw}' bulundu", file=sys.stderr, flush=True)
+                                    break
+                            if is_closed:
+                                break
+                        if is_closed:
+                            continue
 
                     # Vibe tags
                     vibe_tags = ['#SokakLezzeti', f'#{food_type.replace(" ", "")}', '#Yerel']
@@ -3795,6 +3902,41 @@ def generate_specialty_coffee_places(location, filters, exclude_ids):
                     # Place Details API ile yorumları ve ek bilgileri çek
                     place_details = get_place_details_extended(gmaps, place_id) if gmaps and place_id else {'reviews': [], 'foodServices': {}}
                     google_reviews = place_details.get('reviews', [])
+
+                    # ===== ESKİ YORUM KONTROLÜ =====
+                    if place_review_count < 50 and google_reviews:
+                        from datetime import datetime, timedelta
+                        seven_months_ago = datetime.now() - timedelta(days=210)
+                        latest_review_time = None
+                        for review in google_reviews:
+                            review_timestamp = review.get('time')
+                            if review_timestamp:
+                                try:
+                                    review_time = datetime.fromtimestamp(review_timestamp)
+                                    if latest_review_time is None or review_time > latest_review_time:
+                                        latest_review_time = review_time
+                                except:
+                                    pass
+                        if latest_review_time and latest_review_time < seven_months_ago:
+                            print(f"❌ ESKİ YORUM REJECT - {place_name}: son yorum {latest_review_time.strftime('%Y-%m-%d')}", file=sys.stderr, flush=True)
+                            continue
+
+                    # ===== KAPANMIŞ MEKAN KONTROLÜ (YORUM İÇERİĞİ) =====
+                    if google_reviews:
+                        closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'artık kapalı', 'artik kapali',
+                                          'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
+                        is_closed = False
+                        for review in google_reviews[:5]:
+                            review_text = review.get('text', '').lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                            for kw in closed_keywords:
+                                if kw.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u') in review_text:
+                                    is_closed = True
+                                    print(f"❌ KAPANMIŞ MEKAN REJECT - {place_name}: yorumda '{kw}' bulundu", file=sys.stderr, flush=True)
+                                    break
+                            if is_closed:
+                                break
+                        if is_closed:
+                            continue
 
                     venue = {
                         'id': place_id,
@@ -4249,6 +4391,41 @@ def generate_party_venues(location, filters, exclude_ids):
 
                     # Place Details ile yorumları al
                     google_reviews = get_place_reviews(gmaps, place_id) if place_id else []
+
+                    # ===== ESKİ YORUM KONTROLÜ =====
+                    if place_review_count < 50 and google_reviews:
+                        from datetime import datetime, timedelta
+                        seven_months_ago = datetime.now() - timedelta(days=210)
+                        latest_review_time = None
+                        for review in google_reviews:
+                            review_timestamp = review.get('time')
+                            if review_timestamp:
+                                try:
+                                    review_time = datetime.fromtimestamp(review_timestamp)
+                                    if latest_review_time is None or review_time > latest_review_time:
+                                        latest_review_time = review_time
+                                except:
+                                    pass
+                        if latest_review_time and latest_review_time < seven_months_ago:
+                            print(f"❌ ESKİ YORUM REJECT - {place_name}: son yorum {latest_review_time.strftime('%Y-%m-%d')}", file=sys.stderr, flush=True)
+                            continue
+
+                    # ===== KAPANMIŞ MEKAN KONTROLÜ (YORUM İÇERİĞİ) =====
+                    if google_reviews:
+                        closed_keywords = ['kapandı', 'kapandi', 'kapanmış', 'kapanmis', 'artık kapalı', 'artik kapali',
+                                          'permanently closed', 'yerine açıldı', 'yerine acildi', 'burası artık', 'burasi artik']
+                        is_closed = False
+                        for review in google_reviews[:5]:
+                            review_text = review.get('text', '').lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                            for kw in closed_keywords:
+                                if kw.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u') in review_text:
+                                    is_closed = True
+                                    print(f"❌ KAPANMIŞ MEKAN REJECT - {place_name}: yorumda '{kw}' bulundu", file=sys.stderr, flush=True)
+                                    break
+                            if is_closed:
+                                break
+                        if is_closed:
+                            continue
 
                     # Yorumlarda parti keyword'leri sayısı ve tüm yorum metni
                     party_keyword_matches = 0
@@ -5276,66 +5453,9 @@ def generate_venues(request):
                 print(f"❌ KAPALI MEKAN REJECT - {place_name}: {business_status}", file=sys.stderr, flush=True)
                 continue
 
-            # ===== ESKİ YORUM KONTROLÜ (TÜM KATEGORİLER) =====
-            # 7 aydır yorum gelmemişse muhtemelen kapalı - filtrele
-            # NOT: 50+ yorumu olan popüler mekanlar bu kontrolden muaf (sezonluk mekanlar için)
-            if place_review_count < 50:
-                raw_reviews = place.get('reviews', [])
-                if raw_reviews:
-                    from datetime import datetime, timedelta
-                    seven_months_ago = datetime.now() - timedelta(days=210)  # 7 ay
-
-                    # En güncel yorumu bul
-                    latest_review_time = None
-                    for review in raw_reviews:
-                        publish_time_str = review.get('publishTime', '')
-                        if publish_time_str:
-                            try:
-                                review_time = datetime.fromisoformat(publish_time_str.replace('Z', '+00:00'))
-                                review_time = review_time.replace(tzinfo=None)
-                                if latest_review_time is None or review_time > latest_review_time:
-                                    latest_review_time = review_time
-                            except:
-                                pass
-
-                    # En güncel yorum 7 aydan eski mi?
-                    if latest_review_time and latest_review_time < seven_months_ago:
-                        print(f"❌ ESKİ YORUM REJECT - {place_name}: son yorum {latest_review_time.strftime('%Y-%m-%d')} (7 aydan eski)", file=sys.stderr, flush=True)
-                        continue
-
-            # ===== KAPANMIŞ MEKAN KONTROLÜ (YORUM İÇERİĞİ) =====
-            # Google "OPERATIONAL" dese bile yorumlarda "kapandı" yazıyorsa filtrele
-            # NOT: "el değiştir" kaldırıldı - el değiştirmek kapanmak anlamına gelmiyor
-            raw_reviews = place.get('reviews', [])
-            if raw_reviews:
-                closed_keywords = [
-                    'kalıcı olarak kapan', 'kalici olarak kapan',
-                    'artık kapalı', 'artik kapali',
-                    'kapandı', 'kapandi',
-                    'kapanmış', 'kapanmis',
-                    'permanently closed', 'closed permanently',
-                    'yeni işletme', 'yeni isletme',
-                    'isim değişti', 'isim degisti',
-                    'yerine açıldı', 'yerine acildi',
-                    'burası artık', 'burasi artik'
-                ]
-
-                is_closed_by_reviews = False
-                for review in raw_reviews[:5]:  # Son 5 yorumu kontrol et
-                    review_text = review.get('text', {}).get('text', '').lower()
-                    review_text_normalized = review_text.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
-
-                    for keyword in closed_keywords:
-                        keyword_normalized = keyword.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
-                        if keyword_normalized in review_text_normalized:
-                            is_closed_by_reviews = True
-                            print(f"❌ KAPANMIŞ MEKAN (YORUM) REJECT - {place_name}: yorumda '{keyword}' bulundu", file=sys.stderr, flush=True)
-                            break
-                    if is_closed_by_reviews:
-                        break
-
-                if is_closed_by_reviews:
-                    continue
+            # NOT: Eski yorum ve kapanmış mekan (yorum içeriği) kontrolleri
+            # Place Details ile yorumlar çekildikten SONRA yapılıyor (satır ~5542)
+            # Çünkü Legacy Text Search API yorumları döndürmüyor.
 
             # ===== TEKEL/MARKET FİLTRESİ =====
             # Tüm kategorilerde tekel, market, bakkal gibi yerleri hariç tut
@@ -5537,6 +5657,62 @@ def generate_venues(request):
             place_details = get_place_details_extended(gmaps, place_id) if place_id else {'reviews': [], 'foodServices': {}}
             google_reviews = place_details.get('reviews', [])
             food_services = place_details.get('foodServices', {})
+
+            # ===== ESKİ YORUM KONTROLÜ (YORUMLAR ÇEKİLDİKTEN SONRA) =====
+            # 7 aydır yorum gelmemişse muhtemelen kapalı - filtrele
+            # NOT: 50+ yorumu olan popüler mekanlar bu kontrolden muaf (sezonluk mekanlar için)
+            if place_review_count < 50 and google_reviews:
+                from datetime import datetime, timedelta
+                seven_months_ago = datetime.now() - timedelta(days=210)  # 7 ay
+
+                # En güncel yorumu bul (UNIX timestamp kullanarak)
+                latest_review_time = None
+                for review in google_reviews:
+                    review_timestamp = review.get('time')
+                    if review_timestamp:
+                        try:
+                            review_time = datetime.fromtimestamp(review_timestamp)
+                            if latest_review_time is None or review_time > latest_review_time:
+                                latest_review_time = review_time
+                        except:
+                            pass
+
+                # En güncel yorum 7 aydan eski mi?
+                if latest_review_time and latest_review_time < seven_months_ago:
+                    print(f"❌ ESKİ YORUM REJECT - {place_name}: son yorum {latest_review_time.strftime('%Y-%m-%d')} (7 aydan eski)", file=sys.stderr, flush=True)
+                    continue
+
+            # ===== KAPANMIŞ MEKAN KONTROLÜ - YORUM İÇERİĞİ (YORUMLAR ÇEKİLDİKTEN SONRA) =====
+            # Google "OPERATIONAL" dese bile yorumlarda "kapandı" yazıyorsa filtrele
+            if google_reviews:
+                closed_keywords = [
+                    'kalıcı olarak kapan', 'kalici olarak kapan',
+                    'artık kapalı', 'artik kapali',
+                    'kapandı', 'kapandi',
+                    'kapanmış', 'kapanmis',
+                    'permanently closed', 'closed permanently',
+                    'yeni işletme', 'yeni isletme',
+                    'isim değişti', 'isim degisti',
+                    'yerine açıldı', 'yerine acildi',
+                    'burası artık', 'burasi artik'
+                ]
+
+                is_closed_by_reviews = False
+                for review in google_reviews[:5]:  # Son 5 yorumu kontrol et
+                    review_text = review.get('text', '').lower()
+                    review_text_normalized = review_text.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+
+                    for keyword in closed_keywords:
+                        keyword_normalized = keyword.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
+                        if keyword_normalized in review_text_normalized:
+                            is_closed_by_reviews = True
+                            print(f"❌ KAPANMIŞ MEKAN (YORUM) REJECT - {place_name}: yorumda '{keyword}' bulundu", file=sys.stderr, flush=True)
+                            break
+                    if is_closed_by_reviews:
+                        break
+
+                if is_closed_by_reviews:
+                    continue
 
             # Çalışma saatleri - Legacy API format
             opening_hours = place.get('opening_hours', {})
