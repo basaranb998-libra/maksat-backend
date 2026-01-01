@@ -31,7 +31,8 @@ CACHE_TTL = 86400 * 7  # 7 gün
 
 # Türkçe karakter dönüşüm tablosu
 TR_CHAR_MAP = {
-    'ı': 'i', 'İ': 'i', 'ğ': 'g', 'Ğ': 'g',
+    'ı': 'i', 'İ': 'i', 'i̇': 'i',  # i̇ = lowercase i + combining dot (Python'un İ.lower() sonucu)
+    'ğ': 'g', 'Ğ': 'g',
     'ü': 'u', 'Ü': 'u', 'ş': 's', 'Ş': 's',
     'ö': 'o', 'Ö': 'o', 'ç': 'c', 'Ç': 'c',
     'â': 'a', 'Â': 'a', 'î': 'i', 'Î': 'i',
@@ -94,11 +95,21 @@ def generate_username_variants(venue_name: str, city: str = None) -> List[str]:
     base_username = ''.join(core_words)
     if len(base_username) >= 3:
         variants.append(base_username)
+        # Şehir eklentili tam isim (ledimancheizmir gibi) - ÖNCELİKLİ
+        if city:
+            city_ascii = turkish_to_ascii(city.lower())
+            variants.insert(0, f"{base_username}{city_ascii}")  # En başa ekle
+            variants.append(f"{base_username}_{city_ascii}")
+            variants.append(f"{base_username}.{city_ascii}")
 
     # Tüm kelimeler birleşik (FİLTRESİZ - coffee, roasting vs dahil)
     full_username = ''.join(words)
     if len(full_username) >= 3 and full_username != base_username:
         variants.append(full_username)
+        # Şehir eklentili full isim
+        if city:
+            city_ascii = turkish_to_ascii(city.lower())
+            variants.append(f"{full_username}{city_ascii}")
 
     # İlk kelime (genellikle mekan adı)
     if core_words:
@@ -392,10 +403,9 @@ def discover_instagram_url(
     if not instagram_url and GOOGLE_API_KEY and GOOGLE_CSE_ID:
         instagram_url = search_instagram_google(venue_name, city)
 
-    # 4. Mekan adından tahmin DEVRE DIŞI - çok fazla yanlış sonuç veriyor
-    # Sadece onaylanmış kaynaklar (Gemini, website, Google CSE) kullanılıyor
-    # if not instagram_url:
-    #     instagram_url = guess_instagram_from_name(venue_name, city)
+    # 4. Mekan adından tahmin et (şehir eklentili varyantlar - ledimancheizmir gibi)
+    if not instagram_url:
+        instagram_url = guess_instagram_from_name(venue_name, city)
 
     # Cache'e kaydet (None da dahil - negatif cache, ama daha kısa süre)
     _instagram_cache[cache_key] = instagram_url
