@@ -3741,6 +3741,12 @@ def generate_specialty_coffee_places(location, filters, exclude_ids):
                         print(f"⏭️ EXCLUDE - {place_name}: zaten gösterildi", file=sys.stderr, flush=True)
                         continue
 
+                    # Kalıcı/geçici kapalı mekan kontrolü
+                    business_status = place.get('business_status', 'OPERATIONAL')
+                    if business_status in ['CLOSED_PERMANENTLY', 'CLOSED_TEMPORARILY']:
+                        print(f"❌ KAPALI MEKAN REJECT - {place_name}: {business_status}", file=sys.stderr, flush=True)
+                        continue
+
                     # Rating filtresi - 4.0 ve üzeri (kahveciler için daha düşük)
                     if place_rating < 4.0:
                         print(f"❌ RATING REJECT - {place_name}: {place_rating} < 4.0", file=sys.stderr, flush=True)
