@@ -1343,6 +1343,19 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
     api_exclude_ids = exclude_ids_set | all_cached_ids
     print(f"🔀 HYBRID - Fine Dining Cache: {len(cached_venues)}, API exclude: {len(api_exclude_ids)}", file=sys.stderr, flush=True)
 
+    # ===== GAULT & MILLAU ENTEGRASYONU =====
+    gm_venues = get_gm_venues_for_category(
+        category_id='2',  # CATEGORY_FINE_DINING
+        category_name='Fine Dining',
+        city=city,
+        exclude_ids=api_exclude_ids,
+        district=selected_district
+    )
+    if gm_venues:
+        print(f"🏆 G&M - Fine Dining kategorisinde {len(gm_venues)} G&M restoran bulundu ({city})", file=sys.stderr, flush=True)
+        gm_place_ids = {v.get('id') for v in gm_venues if v.get('id')}
+        api_exclude_ids = api_exclude_ids | gm_place_ids
+
     # Birden fazla ilçe için search locations oluştur
     search_locations = []
     if districts:
@@ -1891,18 +1904,32 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                 district=selected_district
             )
 
-        # ===== HYBRID: CACHE + API VENUE'LARINI BİRLEŞTİR =====
+        # ===== HYBRID: GM + CACHE + API VENUE'LARINI BİRLEŞTİR =====
         combined_venues = []
+        existing_ids = set()
+
+        # 1. Önce G&M restoranları ekle (en yüksek öncelik)
+        if gm_venues:
+            enriched_gm = enrich_gm_venues_with_gemini(gm_venues, 'Fine Dining')
+            for gv in enriched_gm:
+                if len(combined_venues) < 50:
+                    combined_venues.append(gv)
+                    existing_ids.add(gv.get('id'))
+            print(f"🏆 G&M Fine Dining - {len(enriched_gm)} G&M restoran eklendi", file=sys.stderr, flush=True)
+
+        # 2. Sonra cache'deki mekanlar
         for cv in cached_venues:
-            if len(combined_venues) < 10:
+            if len(combined_venues) < 50 and cv.get('id') not in existing_ids:
                 combined_venues.append(cv)
-        existing_ids = {v.get('id') for v in combined_venues}
+                existing_ids.add(cv.get('id'))
+
+        # 3. Son olarak API'den gelen mekanlar
         for av in venues:
-            if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+            if len(combined_venues) < 50 and av.get('id') not in existing_ids:
                 combined_venues.append(av)
                 existing_ids.add(av.get('id'))
 
-        print(f"🔀 HYBRID Fine Dining - Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
+        print(f"🔀 HYBRID Fine Dining - G&M: {len(gm_venues) if gm_venues else 0}, Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
 
         return Response(combined_venues, status=status.HTTP_200_OK)
 
