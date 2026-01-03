@@ -107,6 +107,24 @@ def is_michelin_restaurant(venue_name):
 from .models import FavoriteVenue, SearchHistory, UserProfile, CachedVenue, GaultMillauVenue
 from django.utils import timezone
 from datetime import timedelta
+import re
+
+def clean_json_string(json_str: str) -> str:
+    """
+    Gemini'den dönen JSON string'ini temizler.
+    - Trailing comma'ları kaldırır (,] ve ,} pattern'leri)
+    - Markdown code block'ları temizler
+    """
+    # Markdown code block temizle
+    json_str = re.sub(r'```json\s*|\s*```', '', json_str)
+    json_str = json_str.strip()
+
+    # Trailing comma'ları temizle: ,] -> ] ve ,} -> }
+    json_str = re.sub(r',\s*]', ']', json_str)
+    json_str = re.sub(r',\s*}', '}', json_str)
+
+    return json_str
+
 from .cache_service import (
     get_cached_venues_for_hybrid_swr,
     save_venues_to_cache_swr,
@@ -6644,21 +6662,23 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                     response = model.generate_content(batch_prompt)
                     response_text = response.text.strip()
 
-                    # Güvenli JSON parse
-                    import re
-                    # Markdown code block temizle
-                    response_text = re.sub(r'```json\s*|\s*```', '', response_text)
-                    response_text = response_text.strip()
+                    # Güvenli JSON parse - trailing comma ve markdown temizle
+                    response_text = clean_json_string(response_text)
 
                     try:
                         ai_results = json.loads(response_text)
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as je:
+                        print(f"⚠️ JSON parse hatası (ilk deneme): {je}", file=sys.stderr, flush=True)
                         # Array bulmaya çalış
                         match = re.search(r'\[.*\]', response_text, re.DOTALL)
                         if match:
-                            ai_results = json.loads(match.group())
+                            try:
+                                ai_results = json.loads(clean_json_string(match.group()))
+                            except json.JSONDecodeError:
+                                print(f"⚠️ JSON array parse edilemedi, fallback kullanılıyor", file=sys.stderr, flush=True)
+                                ai_results = []
                         else:
-                            print(f"⚠️ JSON parse edilemedi, fallback kullanılıyor", file=sys.stderr, flush=True)
+                            print(f"⚠️ JSON array bulunamadı, fallback kullanılıyor", file=sys.stderr, flush=True)
                             ai_results = []
 
                     # AI sonuçlarını mekanlarla eşleştir
