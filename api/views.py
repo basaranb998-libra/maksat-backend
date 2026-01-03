@@ -8,7 +8,7 @@ from django.conf import settings
 import googlemaps
 import google.generativeai as genai
 import urllib.parse
-from .instagram_service import discover_instagram_url
+from .instagram_service import discover_instagram_url, find_instagram_simple
 from .gault_millau_data import enrich_venues_with_gault_millau, get_gm_restaurants_for_category as get_static_gm_restaurants
 from .popular_venues_data import enrich_venues_with_instagram
 
@@ -4136,8 +4136,8 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                             if instagram_url:
                                 venue['instagramUrl'] = instagram_url
                                 venue['instagramEstimated'] = not is_verified  # Doğrulanmamışsa True
-                                status = "verified" if is_verified else "estimated"
-                                print(f"📸 3. Nesil Kahveci Instagram ({status}): {venue['name']} -> {instagram_url}", file=sys.stderr, flush=True)
+                                insta_status = "verified" if is_verified else "estimated"
+                                print(f"📸 3. Nesil Kahveci Instagram ({insta_status}): {venue['name']} -> {instagram_url}", file=sys.stderr, flush=True)
 
                     print(f"✅ Gemini enrichment completed for {len(venues)} venues", file=sys.stderr, flush=True)
 
@@ -6205,13 +6205,19 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                             'googleMapsUrl': place['google_maps_url'],
                             'googleReviews': place.get('google_reviews', []),
                             'website': place.get('website', ''),
-                            'instagramUrl': discover_instagram_url(
-                                venue_name=place['name'],
-                                city=city,
-                                website=place.get('website'),
-                                existing_instagram=ai_data.get('instagramUrl'),
-                                district=selected_district,
-                                neighborhood=selected_neighborhood
+                            'instagramUrl': (
+                                find_instagram_simple(
+                                    venue_name=place['name'],
+                                    neighborhood=selected_neighborhood,
+                                    city=city
+                                ) if category['name'] == 'Meyhane' else discover_instagram_url(
+                                    venue_name=place['name'],
+                                    city=city,
+                                    website=place.get('website'),
+                                    existing_instagram=ai_data.get('instagramUrl'),
+                                    district=selected_district,
+                                    neighborhood=selected_neighborhood
+                                )
                             ) or '',
                             'phoneNumber': place.get('phone_number', ''),
                             'hours': place.get('hours', ''),
@@ -6273,13 +6279,19 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                         'googleMapsUrl': place['google_maps_url'],
                         'googleReviews': place.get('google_reviews', []),
                         'website': place.get('website', ''),
-                        'instagramUrl': discover_instagram_url(
-                            venue_name=place['name'],
-                            city=city,
-                            website=place.get('website'),
-                            existing_instagram=None,
-                            district=selected_district,
-                            neighborhood=selected_neighborhood
+                        'instagramUrl': (
+                            find_instagram_simple(
+                                venue_name=place['name'],
+                                neighborhood=selected_neighborhood,
+                                city=city
+                            ) if category['name'] == 'Meyhane' else discover_instagram_url(
+                                venue_name=place['name'],
+                                city=city,
+                                website=place.get('website'),
+                                existing_instagram=None,
+                                district=selected_district,
+                                neighborhood=selected_neighborhood
+                            )
                         ) or '',
                         'phoneNumber': place.get('phone_number', ''),
                         'hours': place.get('hours', ''),
