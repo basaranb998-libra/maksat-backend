@@ -845,8 +845,8 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
 
 # ===== CACHE HELPER FONKSİYONLARI (SWR - Stale-While-Revalidate) =====
-CACHE_VENUES_LIMIT = 10  # Cache'ten alınacak venue sayısı (normal istek için)
-CACHE_VENUES_LIMIT_LOAD_MORE = 20  # Load More için daha fazla venue çek
+CACHE_VENUES_LIMIT = 50  # Cache'ten alınacak venue sayısı (normal istek için)
+CACHE_VENUES_LIMIT_LOAD_MORE = 50  # Load More için daha fazla venue çek
 
 
 def get_cached_venues_for_hybrid(category_name: str, city: str, district: str = None, neighborhood: str = None, exclude_ids: set = None, limit: int = 5, refresh_callback=None):
@@ -1519,6 +1519,7 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
                 "gourmet restaurant",
                 "upscale restaurant",
                 "tasting menu",
+                "rooftop restaurant",
             ]
 
             all_places = []
@@ -1908,32 +1909,70 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                 district=selected_district
             )
 
-        # ===== HYBRID: GM + CACHE + API VENUE'LARINI BİRLEŞTİR =====
+        # ===== HYBRID: MICHELIN + GM + CACHE + API VENUE'LARINI BİRLEŞTİR =====
+        # Öncelik sırası: 1. Michelin, 2. G&M (Michelin olmayanlar), 3. Diğerleri
         combined_venues = []
         existing_ids = set()
 
-        # 1. Önce G&M restoranları ekle (en yüksek öncelik)
+        # Tüm venue'ları tek listede topla
+        all_venues = []
+
+        # G&M restoranları
+        enriched_gm = []
         if gm_venues:
             enriched_gm = enrich_gm_venues_with_gemini(gm_venues, 'Fine Dining')
             for gv in enriched_gm:
-                if len(combined_venues) < 50:
-                    combined_venues.append(gv)
-                    existing_ids.add(gv.get('id'))
-            print(f"🏆 G&M Fine Dining - {len(enriched_gm)} G&M restoran eklendi", file=sys.stderr, flush=True)
+                gv['_source'] = 'gm'
+                # Michelin kontrolü - hem G&M hem Michelin ise Michelin öncelikli
+                michelin_check = is_michelin_restaurant(gv.get('name', ''))
+                if michelin_check:
+                    gv['isMichelinStarred'] = True
+                    gv['michelinStars'] = michelin_check.get('stars', 0)
+                    gv['isBibGourmand'] = michelin_check.get('isBib', False)
+                all_venues.append(gv)
 
-        # 2. Sonra cache'deki mekanlar
+        # Cache'deki mekanlar
         for cv in cached_venues:
-            if len(combined_venues) < 50 and cv.get('id') not in existing_ids:
-                combined_venues.append(cv)
-                existing_ids.add(cv.get('id'))
+            if cv.get('id') not in {v.get('id') for v in all_venues}:
+                cv['_source'] = 'cache'
+                all_venues.append(cv)
 
-        # 3. Son olarak API'den gelen mekanlar
+        # API'den gelen mekanlar
         for av in venues:
-            if len(combined_venues) < 50 and av.get('id') not in existing_ids:
-                combined_venues.append(av)
-                existing_ids.add(av.get('id'))
+            if av.get('id') not in {v.get('id') for v in all_venues}:
+                av['_source'] = 'api'
+                all_venues.append(av)
 
-        print(f"🔀 HYBRID Fine Dining - G&M: {len(gm_venues) if gm_venues else 0}, Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
+        # Sıralama: Michelin > G&M > Diğerleri
+        def fine_dining_sort_key(venue):
+            is_michelin = venue.get('isMichelinStarred', False)
+            michelin_stars = venue.get('michelinStars', 0)
+            is_bib = venue.get('isBibGourmand', False)
+            has_gm = venue.get('gaultMillauToques') is not None
+            gm_toques = venue.get('gaultMillauToques', 0) or 0
+            rating = venue.get('googleRating', 0) or 0
+
+            # Öncelik: Michelin yıldız (çoktan aza) > Bib Gourmand > G&M (toque'a göre) > Diğer (rating'e göre)
+            if is_michelin and michelin_stars > 0:
+                return (0, -michelin_stars, -rating)
+            elif is_bib:
+                return (1, 0, -rating)
+            elif has_gm:
+                return (2, -gm_toques, -rating)
+            else:
+                return (3, 0, -rating)
+
+        all_venues.sort(key=fine_dining_sort_key)
+
+        # İlk 50'yi al
+        for venue in all_venues[:50]:
+            venue.pop('_source', None)  # Geçici alanı temizle
+            combined_venues.append(venue)
+            existing_ids.add(venue.get('id'))
+
+        michelin_count = sum(1 for v in combined_venues if v.get('isMichelinStarred'))
+        gm_count = sum(1 for v in combined_venues if v.get('gaultMillauToques') and not v.get('isMichelinStarred'))
+        print(f"🔀 HYBRID Fine Dining - Michelin: {michelin_count}, G&M: {gm_count}, Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
 
         return Response(combined_venues, status=status.HTTP_200_OK)
 
@@ -3405,11 +3444,11 @@ SADECE JSON array döndür, başka açıklama ekleme. [{{}}, {{}}, ...]"""
                     # ===== HYBRID: CACHE + API BİRLEŞTİR =====
                     combined_venues = []
                     for cv in cached_venues:
-                        if len(combined_venues) < 10:
+                        if len(combined_venues) < 50:
                             combined_venues.append(cv)
                     existing_ids = {v.get('id') for v in combined_venues}
                     for av in final_venues:
-                        if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+                        if len(combined_venues) < 50 and av.get('id') not in existing_ids:
                             combined_venues.append(av)
                             existing_ids.add(av.get('id'))
 
@@ -3443,11 +3482,11 @@ SADECE JSON array döndür, başka açıklama ekleme. [{{}}, {{}}, ...]"""
         # ===== HYBRID: CACHE + API =====
         combined_venues = []
         for cv in cached_venues:
-            if len(combined_venues) < 10:
+            if len(combined_venues) < 50:
                 combined_venues.append(cv)
         existing_ids = {v.get('id') for v in combined_venues}
         for av in venues:
-            if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+            if len(combined_venues) < 50 and av.get('id') not in existing_ids:
                 combined_venues.append(av)
                 existing_ids.add(av.get('id'))
 
@@ -3927,23 +3966,49 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
                     print(f"✅ Gemini ile {len(final_venues)} Sokak Lezzeti mekan zenginleştirildi", file=sys.stderr, flush=True)
 
-                    # ===== G&M VENUE'LARI EN BAŞA EKLE =====
+                    # ===== G&M VENUE'LARI MICHELIN ÖNCELİKLİ SIRALA VE BAŞA EKLE =====
                     if gm_venues:
                         # G&M mekanlarını Gemini ile zenginleştir
                         enriched_gm = enrich_gm_venues_with_gemini(gm_venues, 'Sokak Lezzeti')
+
+                        # Hem G&M hem Michelin olan mekanlara Michelin badge ekle
+                        for gv in enriched_gm:
+                            michelin_check = is_michelin_restaurant(gv.get('name', ''))
+                            if michelin_check:
+                                gv['isMichelinStarred'] = True
+                                gv['michelinStars'] = michelin_check.get('stars', 0)
+                                gv['isBibGourmand'] = michelin_check.get('isBib', False)
+
+                        # Michelin > G&M sıralaması
+                        def michelin_gm_sort_key(venue):
+                            is_michelin = venue.get('isMichelinStarred', False)
+                            michelin_stars = venue.get('michelinStars', 0)
+                            is_bib = venue.get('isBibGourmand', False)
+                            gm_toques = venue.get('gaultMillauToques', 0) or 0
+                            rating = venue.get('googleRating', 0) or 0
+                            if is_michelin and michelin_stars > 0:
+                                return (0, -michelin_stars, -rating)
+                            elif is_bib:
+                                return (1, 0, -rating)
+                            else:
+                                return (2, -gm_toques, -rating)
+
+                        enriched_gm.sort(key=michelin_gm_sort_key)
+
                         combined_result = []
                         existing_ids = set()
-                        # 1. Önce G&M venue'larını ekle
+                        # 1. Önce G&M venue'larını ekle (Michelin öncelikli sıralanmış)
                         for gv in enriched_gm:
-                            if len(combined_result) < 10:
+                            if len(combined_result) < 50:
                                 combined_result.append(gv)
                                 existing_ids.add(gv.get('id'))
                         # 2. Sonra Gemini-enriched venue'ları ekle
                         for fv in final_venues:
-                            if len(combined_result) < 10 and fv.get('id') not in existing_ids:
+                            if len(combined_result) < 50 and fv.get('id') not in existing_ids:
                                 combined_result.append(fv)
                                 existing_ids.add(fv.get('id'))
-                        print(f"🔀 HYBRID RESULT - G&M: {len(enriched_gm)}, Gemini: {len(final_venues)}, Combined: {len(combined_result)}", file=sys.stderr, flush=True)
+                        michelin_in_gm = sum(1 for v in enriched_gm if v.get('isMichelinStarred'))
+                        print(f"🔀 HYBRID RESULT - G&M: {len(enriched_gm)} (Michelin: {michelin_in_gm}), Gemini: {len(final_venues)}, Combined: {len(combined_result)}", file=sys.stderr, flush=True)
                         return Response(combined_result, status=status.HTTP_200_OK)
                     return Response(final_venues, status=status.HTTP_200_OK)
 
@@ -3979,19 +4044,19 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
         # 1. Önce G&M venue'larını ekle (en yüksek öncelik)
         for gv in gm_venues:
-            if len(combined_venues) < 10:
+            if len(combined_venues) < 50:
                 combined_venues.append(gv)
                 existing_ids.add(gv.get('id'))
 
         # 2. Sonra cache'ten gelenleri ekle
         for cv in cached_venues:
-            if len(combined_venues) < 10 and cv.get('id') not in existing_ids:
+            if len(combined_venues) < 50 and cv.get('id') not in existing_ids:
                 combined_venues.append(cv)
                 existing_ids.add(cv.get('id'))
 
         # 3. Son olarak API'den gelenleri ekle (duplicate olmayanları)
         for av in venues:
-            if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+            if len(combined_venues) < 50 and av.get('id') not in existing_ids:
                 combined_venues.append(av)
                 existing_ids.add(av.get('id'))
 
@@ -4390,19 +4455,19 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
         # 1. Önce G&M venue'larını ekle
         for gv in gm_venues:
-            if len(combined_venues) < 10:
+            if len(combined_venues) < 50:
                 combined_venues.append(gv)
                 existing_ids.add(gv.get('id'))
 
         # 2. Sonra cache'ten gelenleri ekle
         for cv in cached_venues:
-            if len(combined_venues) < 10 and cv.get('id') not in existing_ids:
+            if len(combined_venues) < 50 and cv.get('id') not in existing_ids:
                 combined_venues.append(cv)
                 existing_ids.add(cv.get('id'))
 
         # 3. Son olarak API'den gelenleri ekle
         for av in venues:
-            if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+            if len(combined_venues) < 50 and av.get('id') not in existing_ids:
                 combined_venues.append(av)
                 existing_ids.add(av.get('id'))
 
@@ -5038,11 +5103,11 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                     # ===== HYBRID: CACHE + API VENUE'LARINI BİRLEŞTİR =====
                     combined_venues = []
                     for cv in cached_venues:
-                        if len(combined_venues) < 10:
+                        if len(combined_venues) < 50:
                             combined_venues.append(cv)
                     existing_ids = {v.get('id') for v in combined_venues}
                     for av in final_venues:
-                        if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+                        if len(combined_venues) < 50 and av.get('id') not in existing_ids:
                             combined_venues.append(av)
                             existing_ids.add(av.get('id'))
 
@@ -5078,11 +5143,11 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
         # ===== HYBRID: CACHE + API VENUE'LARINI BİRLEŞTİR =====
         combined_venues = []
         for cv in cached_venues:
-            if len(combined_venues) < 10:
+            if len(combined_venues) < 50:
                 combined_venues.append(cv)
         existing_ids = {v.get('id') for v in combined_venues}
         for av in venues:
-            if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+            if len(combined_venues) < 50 and av.get('id') not in existing_ids:
                 combined_venues.append(av)
                 existing_ids.add(av.get('id'))
 
@@ -5398,10 +5463,34 @@ def generate_venues(request):
                 gm_count = len(gm_venues)
                 print(f"🏆 G&M ÖNCELİK - {gm_count} G&M restoran bulundu, listenin başına ekleniyor", file=sys.stderr, flush=True)
 
-                # Eğer 10'dan fazla G&M restoran varsa sadece ilk 10'u döndür
+                # Eğer 10'dan fazla G&M restoran varsa Michelin öncelikli sırala ve ilk 10'u döndür
                 if gm_count >= 10:
                     # G&M mekanlarını Gemini ile zenginleştir
                     enriched_gm = enrich_gm_venues_with_gemini(gm_venues[:10], category_name)
+
+                    # Hem G&M hem Michelin olan mekanlara Michelin badge ekle
+                    for gv in enriched_gm:
+                        michelin_check = is_michelin_restaurant(gv.get('name', ''))
+                        if michelin_check:
+                            gv['isMichelinStarred'] = True
+                            gv['michelinStars'] = michelin_check.get('stars', 0)
+                            gv['isBibGourmand'] = michelin_check.get('isBib', False)
+
+                    # Michelin > G&M sıralaması
+                    def michelin_gm_sort_key(venue):
+                        is_michelin = venue.get('isMichelinStarred', False)
+                        michelin_stars = venue.get('michelinStars', 0)
+                        is_bib = venue.get('isBibGourmand', False)
+                        gm_toques = venue.get('gaultMillauToques', 0) or 0
+                        rating = venue.get('googleRating', 0) or 0
+                        if is_michelin and michelin_stars > 0:
+                            return (0, -michelin_stars, -rating)
+                        elif is_bib:
+                            return (1, 0, -rating)
+                        else:
+                            return (2, -gm_toques, -rating)
+
+                    enriched_gm.sort(key=michelin_gm_sort_key)
                     return Response(enriched_gm, status=status.HTTP_200_OK)
 
                 # 10'dan az G&M restoran var, cache/API ile tamamla
@@ -5465,23 +5554,48 @@ def generate_venues(request):
                 }, status=status.HTTP_200_OK)
 
         # ===== CACHE YETERLI İSE API ÇAĞRISINI ATLA (MALİYET OPTİMİZASYONU) =====
-        # Cache'te 10+ venue varsa direkt döndür, API çağrısı yapma
-        MIN_VENUES_FOR_CACHE_ONLY = 10  # 10 mekan varsa cache yeterli
+        # Cache'te 50+ venue varsa direkt döndür, API çağrısı yapma
+        MIN_VENUES_FOR_CACHE_ONLY = 50  # 50 mekan varsa cache yeterli
 
         if len(cached_venues) >= MIN_VENUES_FOR_CACHE_ONLY and not is_load_more_request:
             print(f"✅ CACHE HIT - {len(cached_venues)} venue cache'ten döndürülüyor, API çağrısı atlandı!", file=sys.stderr, flush=True)
             # Instagram URL enrichment - cache'deki eksik Instagram URL'lerini bul
             enriched_venues = enrich_cached_venues_with_instagram(cached_venues, city, selected_district, selected_neighborhood)
-            # G&M venue'larını başa ekle (varsa) - duplicate önleme ile
+            # G&M venue'larını Michelin öncelikli sırala ve başa ekle (varsa) - duplicate önleme ile
             if gm_venues:
                 # G&M mekanlarını Gemini ile zenginleştir
                 enriched_gm = enrich_gm_venues_with_gemini(gm_venues, category_name)
+
+                # Hem G&M hem Michelin olan mekanlara Michelin badge ekle
+                for gv in enriched_gm:
+                    michelin_check = is_michelin_restaurant(gv.get('name', ''))
+                    if michelin_check:
+                        gv['isMichelinStarred'] = True
+                        gv['michelinStars'] = michelin_check.get('stars', 0)
+                        gv['isBibGourmand'] = michelin_check.get('isBib', False)
+
+                # Michelin > G&M sıralaması
+                def michelin_gm_sort_key(venue):
+                    is_michelin = venue.get('isMichelinStarred', False)
+                    michelin_stars = venue.get('michelinStars', 0)
+                    is_bib = venue.get('isBibGourmand', False)
+                    gm_toques = venue.get('gaultMillauToques', 0) or 0
+                    rating = venue.get('googleRating', 0) or 0
+                    if is_michelin and michelin_stars > 0:
+                        return (0, -michelin_stars, -rating)
+                    elif is_bib:
+                        return (1, 0, -rating)
+                    else:
+                        return (2, -gm_toques, -rating)
+
+                enriched_gm.sort(key=michelin_gm_sort_key)
+
                 # G&M venue ID'lerini al
                 gm_ids = {v.get('id') for v in enriched_gm if v.get('id')}
                 # enriched_venues'dan G&M ID'lerini çıkar (duplicate önleme)
                 enriched_venues = [v for v in enriched_venues if v.get('id') not in gm_ids]
                 # G&M'leri başa ekle, kalan slotları doldur
-                remaining_slots = 10 - len(enriched_gm)
+                remaining_slots = 50 - len(enriched_gm)
                 final_venues = enriched_gm + enriched_venues[:remaining_slots]
                 return Response(final_venues, status=status.HTTP_200_OK)
             return Response(enriched_venues, status=status.HTTP_200_OK)
@@ -5497,12 +5611,12 @@ def generate_venues(request):
         if alcohol_filter == 'Alcoholic':
             # Alkollü mekan seçilirse SADECE bar, pub, restaurant, wine bar ara
             category_query_map = {
-                'İlk Buluşma': 'romantic restaurant wine bar cocktail bar date night fine dining lounge',
+                'İlk Buluşma': 'romantic restaurant wine bar cocktail bar date night fine dining lounge rooftop',
                 'İş Yemeği': 'restaurant bar hotel lounge business lunch',
                 'Muhabbet': 'bar pub lounge restaurant wine bar',
                 'İş Çıkışı Bira & Kokteyl': 'bar pub cocktail bar beer garden',
                 'Eğlence & Parti': 'nightclub bar pub dance club beach club rooftop bar live music lounge',
-                'Özel Gün': 'fine dining restaurant wine bar romantic',
+                'Özel Gün': 'fine dining restaurant wine bar romantic rooftop',
                 'Kahvaltı & Brunch': 'kahvaltı brunch restaurant bar mimosa serpme kahvaltı',
                 'Kafa Dinleme': 'lounge bar quiet restaurant',
                 'Odaklanma': 'bar restaurant lounge',
@@ -5519,7 +5633,7 @@ def generate_venues(request):
                 'Plaj': 'beach bar restaurant',
                 'Adrenalin': 'adventure sports extreme',
                 'Spor': 'gym fitness yoga studio',
-                'Fine Dining': 'fine dining restaurant wine bar michelin gourmet upscale luxury tasting menu',
+                'Fine Dining': 'fine dining restaurant wine bar michelin gourmet upscale luxury tasting menu rooftop',
                 'Balıkçı': 'balık restoranı seafood restaurant rakı balık',
                 'Meyhane': 'meyhane rakı meze',
                 'Ocakbaşı': 'ocakbaşı kebap ızgara restoran mangal',
@@ -5527,12 +5641,12 @@ def generate_venues(request):
         elif alcohol_filter == 'Non-Alcoholic':
             # Alkolsüz mekan seçilirse SADECE cafe, bakery, coffee shop ara
             category_query_map = {
-                'İlk Buluşma': 'romantic cafe restaurant patisserie brunch spot cozy restaurant date spot',
+                'İlk Buluşma': 'romantic cafe restaurant patisserie brunch spot cozy restaurant date spot rooftop',
                 'İş Yemeği': 'business lunch cafe restaurant coffee shop',
                 'Muhabbet': 'cafe coffee shop tea house quiet cafe',
                 'İş Çıkışı Bira & Kokteyl': 'cafe coffee shop juice bar',
                 'Eğlence & Parti': 'entertainment center arcade bowling',
-                'Özel Gün': 'restaurant cafe patisserie',
+                'Özel Gün': 'restaurant cafe patisserie rooftop',
                 'Kahvaltı & Brunch': 'kahvaltı breakfast brunch cafe serpme kahvaltı',
                 'Kafa Dinleme': 'quiet cafe tea house peaceful spot',
                 'Odaklanma': 'coworking space cafe library quiet study',
@@ -5549,18 +5663,18 @@ def generate_venues(request):
                 'Plaj': 'beach seaside',
                 'Adrenalin': 'adventure sports extreme activities',
                 'Spor': 'gym fitness yoga studio pilates',
-                'Fine Dining': 'fine dining restaurant gourmet upscale',
+                'Fine Dining': 'fine dining restaurant gourmet upscale rooftop',
                 'Ocakbaşı': 'ocakbaşı kebap ızgara restoran mangal',
             }
         else:
             # Any seçilirse her türlü mekan (varsayılan)
             category_query_map = {
-                'İlk Buluşma': 'romantic restaurant cafe wine bar date spot fine dining cozy bistro',
+                'İlk Buluşma': 'romantic restaurant cafe wine bar date spot fine dining cozy bistro rooftop',
                 'İş Yemeği': 'business lunch restaurant cafe meeting spot',
                 'Muhabbet': 'cafe bar lounge restaurant cozy spot conversation friendly',
                 'İş Çıkışı Bira & Kokteyl': 'bar pub cocktail bar beer garden after work drinks',
                 'Eğlence & Parti': 'nightclub bar pub dance club beach club rooftop bar live music lounge entertainment',
-                'Özel Gün': 'fine dining restaurant romantic celebration',
+                'Özel Gün': 'fine dining restaurant romantic celebration rooftop',
                 'Kahvaltı & Brunch': 'kahvaltı breakfast brunch cafe serpme kahvaltı',
                 'Kafa Dinleme': 'quiet cafe lounge peaceful spot relaxing',
                 'Odaklanma': 'coworking space cafe library quiet study',
@@ -5577,7 +5691,7 @@ def generate_venues(request):
                 'Plaj': 'beach seaside coast',
                 'Adrenalin': 'adventure sports extreme activities outdoor',
                 'Spor': 'gym fitness yoga studio pilates wellness',
-                'Fine Dining': 'fine dining restaurant upscale gourmet michelin luxury tasting menu',
+                'Fine Dining': 'fine dining restaurant upscale gourmet michelin luxury tasting menu rooftop',
                 'Meyhane': 'meyhane restaurant turkish tavern rakı meze',
                 'Balıkçı': 'balık restoranı seafood restaurant balık lokantası',
                 'Sokak Lezzeti': 'kokoreç midye balık ekmek tantuni lahmacun pide söğüş çiğköfte döner',
@@ -6681,18 +6795,47 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
             print(f"🔀 HYBRID RESULT - Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
 
-        # G&M venue'larını başa ekle (varsa ve LoadMore değilse)
+        # G&M venue'larını Michelin öncelikli sırala ve başa ekle (varsa ve LoadMore değilse)
         if gm_venues and not is_load_more_request:
             # G&M mekanlarını Gemini ile zenginleştir
             enriched_gm = enrich_gm_venues_with_gemini(gm_venues, category_name)
+
+            # Hem G&M hem Michelin olan mekanlara Michelin badge ekle
+            for gv in enriched_gm:
+                michelin_check = is_michelin_restaurant(gv.get('name', ''))
+                if michelin_check:
+                    gv['isMichelinStarred'] = True
+                    gv['michelinStars'] = michelin_check.get('stars', 0)
+                    gv['isBibGourmand'] = michelin_check.get('isBib', False)
+
             # G&M venue ID'lerini al
             gm_ids = {v.get('id') for v in enriched_gm if v.get('id')}
             # combined_venues'dan G&M ID'lerini çıkar (duplicate önleme)
             combined_venues = [v for v in combined_venues if v.get('id') not in gm_ids]
+
+            # Michelin > G&M sıralaması
+            def michelin_gm_sort_key(venue):
+                is_michelin = venue.get('isMichelinStarred', False)
+                michelin_stars = venue.get('michelinStars', 0)
+                is_bib = venue.get('isBibGourmand', False)
+                gm_toques = venue.get('gaultMillauToques', 0) or 0
+                rating = venue.get('googleRating', 0) or 0
+
+                if is_michelin and michelin_stars > 0:
+                    return (0, -michelin_stars, -rating)
+                elif is_bib:
+                    return (1, 0, -rating)
+                else:
+                    return (2, -gm_toques, -rating)
+
+            enriched_gm.sort(key=michelin_gm_sort_key)
+
             # G&M'leri başa ekle, kalan slotları doldur
             remaining_slots = 50 - len(enriched_gm)
             combined_venues = enriched_gm + combined_venues[:remaining_slots]
-            print(f"🏆 G&M PREPEND (HYBRID) - {len(enriched_gm)} G&M venue başa eklendi (Gemini zenginleştirildi)", file=sys.stderr, flush=True)
+
+            michelin_in_gm = sum(1 for v in enriched_gm if v.get('isMichelinStarred'))
+            print(f"🏆 G&M PREPEND (HYBRID) - {len(enriched_gm)} G&M venue başa eklendi (Michelin: {michelin_in_gm})", file=sys.stderr, flush=True)
 
         # Arama geçmişine kaydet
         if request.user.is_authenticated:
