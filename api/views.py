@@ -1510,38 +1510,41 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
         if len(all_venues_for_gemini) < 50:
             remaining_slots = 50 - len(all_venues_for_gemini)
 
-            url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+            # Nearby Search API - kesin lokasyon filtrelemesi yapar
+            nearby_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
 
-            query_templates = [
-                "fine dining restaurant {loc}",
-                "upscale gourmet restaurant {loc}",
-                "tasting menu restaurant {loc}",
-                "chef's table degustasyon {loc}",
+            # Fine dining için keyword'ler
+            keywords = [
+                "fine dining",
+                "gourmet restaurant",
+                "upscale restaurant",
+                "tasting menu",
             ]
 
             all_places = []
             for search_loc in search_locations:
-                for template in query_templates:
+                if search_loc not in location_coords_map:
+                    continue
+
+                lat, lng = location_coords_map[search_loc]
+
+                for keyword in keywords:
                     if len(all_places) >= remaining_slots + 15:
                         break
 
-                    query = template.format(loc=search_loc)
                     params = {
-                        "query": query,
+                        "location": f"{lat},{lng}",
+                        "radius": 2000,  # 2km yarıçap - kesin filtreleme
+                        "type": "restaurant",
+                        "keyword": keyword,
                         "language": "tr",
                         "key": settings.GOOGLE_MAPS_API_KEY
                     }
 
-                    # Location bias ekle (koordinatlar alındıysa)
-                    if search_loc in location_coords_map:
-                        lat, lng = location_coords_map[search_loc]
-                        params["location"] = f"{lat},{lng}"
-                        params["radius"] = 1500  # 1.5km yarıçap - daha sıkı filtreleme
-
-                    print(f"🔍 Fine dining araması: {query} (location bias: {search_loc in location_coords_map})", file=sys.stderr, flush=True)
+                    print(f"🔍 Fine dining Nearby Search: {keyword} @ {search_loc} (lat:{lat}, lng:{lng})", file=sys.stderr, flush=True)
 
                     try:
-                        response = requests.get(url, params=params)
+                        response = requests.get(nearby_url, params=params)
                         if response.status_code == 200:
                             places_data = response.json()
                             places_list = places_data.get('results', [])
@@ -1553,7 +1556,7 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
                                     break
                                 time.sleep(2)
                                 next_params = {"pagetoken": next_page_token, "key": settings.GOOGLE_MAPS_API_KEY}
-                                next_response = requests.get(url, params=next_params)
+                                next_response = requests.get(nearby_url, params=next_params)
                                 if next_response.status_code == 200:
                                     next_data = next_response.json()
                                     places_list.extend(next_data.get('results', []))
@@ -1562,7 +1565,8 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
                             for place in places_list:
                                 place_name = place.get('name', '')
                                 place_name_lower = place_name.lower()
-                                place_address = place.get('formatted_address', '')
+                                # Nearby Search'te vicinity, Text Search'te formatted_address
+                                place_address = place.get('vicinity', '') or place.get('formatted_address', '')
                                 place_rating = place.get('rating', 0)
                                 place_types = place.get('types', [])
 
