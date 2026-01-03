@@ -5455,6 +5455,7 @@ def generate_venues(request):
             place_rating = place.get('rating', 0)
             place_review_count = place.get('user_ratings_total', 0)
             place_types = place.get('types', [])
+            raw_reviews = place.get('reviews', [])  # Yorumlar - Meyhane kategorisi ve güncellik kontrolü için
 
             # ===== EXCLUDE IDS FİLTRESİ: Daha önce gösterilen mekanları atla =====
             if place_id in exclude_ids:
@@ -5603,30 +5604,28 @@ def generate_venues(request):
 
                 # 3. Güncellik filtresi - En güncel yorum 6 aydan eski olmamalı
                 # NOT: 50+ yorumu olan popüler mekanlar bu kontrolden muaf (sezonluk mekanlar için)
-                if place_review_count < 50:  # Sadece 50'den az yorumu olan mekanlar için güncellik kontrolü
-                    raw_reviews = place.get('reviews', [])
-                    if raw_reviews:
-                        from datetime import datetime, timedelta
-                        six_months_ago = datetime.now() - timedelta(days=180)  # 6 ay
+                if place_review_count < 50 and raw_reviews:  # Sadece 50'den az yorumu olan mekanlar için güncellik kontrolü
+                    from datetime import datetime, timedelta
+                    six_months_ago = datetime.now() - timedelta(days=180)  # 6 ay
 
-                        # En güncel yorumu bul
-                        latest_review_time = None
-                        for review in raw_reviews:
-                            publish_time_str = review.get('publishTime', '')
-                            if publish_time_str:
-                                try:
-                                    # Format: "2024-12-10T14:30:00Z"
-                                    review_time = datetime.fromisoformat(publish_time_str.replace('Z', '+00:00'))
-                                    review_time = review_time.replace(tzinfo=None)  # Remove timezone for comparison
-                                    if latest_review_time is None or review_time > latest_review_time:
-                                        latest_review_time = review_time
-                                except:
-                                    pass
+                    # En güncel yorumu bul
+                    latest_review_time = None
+                    for review in raw_reviews:
+                        publish_time_str = review.get('publishTime', '')
+                        if publish_time_str:
+                            try:
+                                # Format: "2024-12-10T14:30:00Z"
+                                review_time = datetime.fromisoformat(publish_time_str.replace('Z', '+00:00'))
+                                review_time = review_time.replace(tzinfo=None)  # Remove timezone for comparison
+                                if latest_review_time is None or review_time > latest_review_time:
+                                    latest_review_time = review_time
+                            except:
+                                pass
 
-                        # En güncel yorum 6 aydan eski mi?
-                        if latest_review_time and latest_review_time < six_months_ago:
-                            print(f"❌ RESTORAN ESKİ YORUM REJECT - {place_name}: son yorum {latest_review_time.strftime('%Y-%m-%d')} (6 aydan eski)", file=sys.stderr, flush=True)
-                            continue
+                    # En güncel yorum 6 aydan eski mi?
+                    if latest_review_time and latest_review_time < six_months_ago:
+                        print(f"❌ RESTORAN ESKİ YORUM REJECT - {place_name}: son yorum {latest_review_time.strftime('%Y-%m-%d')} (6 aydan eski)", file=sys.stderr, flush=True)
+                        continue
 
             # ===== PAVYON/KONSOMATRIS FİLTRESİ =====
             # Eğlence & Parti kategorisi için uygunsuz mekanları filtrele
