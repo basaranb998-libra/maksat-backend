@@ -1494,8 +1494,8 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
         print(f"✅ {len(all_venues_for_gemini)} Michelin restoran eklendi", file=sys.stderr, flush=True)
 
         # 2. ADIM: Google Places'dan ek fine dining restoranlar
-        if len(all_venues_for_gemini) < 10:
-            remaining_slots = 10 - len(all_venues_for_gemini)
+        if len(all_venues_for_gemini) < 50:
+            remaining_slots = 50 - len(all_venues_for_gemini)
 
             url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 
