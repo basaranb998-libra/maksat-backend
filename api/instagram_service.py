@@ -21,7 +21,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Google Custom Search API credentials
-GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
+# GOOGLE_MAPS_API_KEY kullanılıyor (Render'da bu isimle tanımlı)
+GOOGLE_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY')
 GOOGLE_CSE_ID = os.environ.get('GOOGLE_CSE_ID')
 
 # Cache için basit in-memory storage
