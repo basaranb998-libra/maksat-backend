@@ -213,8 +213,8 @@ def get_venues_with_swr(
         # Apply Gault & Millau enrichment to cached venues
         venues_data = enrich_venues_with_gault_millau(venues_data)
 
-        # Apply Instagram enrichment to cached venues
-        venues_data = enrich_venues_with_instagram(venues_data)
+        # Apply Instagram enrichment to cached venues - Google CSE ile arama
+        venues_data = enrich_venues_with_instagram(venues_data, city, district, neighborhood)
 
         # Update last_accessed for all venues
         CachedVenue.objects.filter(

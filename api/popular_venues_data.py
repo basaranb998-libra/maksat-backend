@@ -17,6 +17,7 @@ Kategoriler:
 """
 
 from typing import Dict, List, Optional
+import sys
 
 
 # Popüler mekanlar veritabanı
@@ -1125,12 +1126,21 @@ def get_venue_instagram(venue_name: str) -> Optional[str]:
     return None
 
 
-def enrich_venue_with_instagram(venue: Dict) -> Dict:
+def enrich_venue_with_instagram(
+    venue: Dict,
+    city: str = None,
+    district: str = None,
+    neighborhood: str = None
+) -> Dict:
     """
     Venue verisine Instagram URL'si ekle (eğer yoksa).
+    Önce statik sözlükten bakar, bulamazsa Google CSE ile arar.
 
     Args:
         venue: Venue dictionary
+        city: Şehir adı (Google CSE için)
+        district: İlçe adı (Google CSE için)
+        neighborhood: Mahalle adı (Google CSE için)
 
     Returns:
         Güncellenmiş venue dictionary
@@ -1139,26 +1149,66 @@ def enrich_venue_with_instagram(venue: Dict) -> Dict:
         return venue
 
     # Zaten Instagram URL'si varsa dokunma
-    if venue.get("instagramUrl"):
+    existing_instagram = venue.get("instagramUrl", "")
+    if existing_instagram and "instagram.com/" in existing_instagram:
         return venue
 
     name = venue.get("name", "")
-    instagram_handle = get_venue_instagram(name)
 
+    # 1. Önce statik sözlükten kontrol et (hızlı)
+    instagram_handle = get_venue_instagram(name)
     if instagram_handle:
         venue["instagramUrl"] = f"https://instagram.com/{instagram_handle}"
+        return venue
+
+    # 2. Statik sözlükte yoksa Google CSE ile ara
+    if city:
+        try:
+            from .instagram_service import discover_instagram_url
+            instagram_url = discover_instagram_url(
+                venue_name=name,
+                city=city,
+                website=venue.get("website"),
+                existing_instagram=existing_instagram if existing_instagram else None,
+                district=district,
+                neighborhood=neighborhood
+            )
+            if instagram_url:
+                venue["instagramUrl"] = instagram_url
+                print(f"🔗 INSTAGRAM ENRICH (Google CSE) - {name}: {instagram_url}", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"⚠️ INSTAGRAM ENRICH error for {name}: {e}", file=sys.stderr, flush=True)
 
     return venue
 
 
-def enrich_venues_with_instagram(venues: List[Dict]) -> List[Dict]:
+def enrich_venues_with_instagram(
+    venues: List[Dict],
+    city: str = None,
+    district: str = None,
+    neighborhood: str = None
+) -> List[Dict]:
     """
     Birden fazla venue'ya Instagram URL'si ekle.
+    Google CSE ile arama yapar.
 
     Args:
         venues: Venue listesi
+        city: Şehir adı
+        district: İlçe adı
+        neighborhood: Mahalle adı
 
     Returns:
         Güncellenmiş venue listesi
     """
-    return [enrich_venue_with_instagram(v) for v in venues]
+    enriched_count = 0
+    for venue in venues:
+        old_instagram = venue.get("instagramUrl", "")
+        enrich_venue_with_instagram(venue, city, district, neighborhood)
+        if venue.get("instagramUrl") and venue.get("instagramUrl") != old_instagram:
+            enriched_count += 1
+
+    if enriched_count > 0:
+        print(f"✨ INSTAGRAM BATCH ENRICH - {enriched_count}/{len(venues)} venue zenginleştirildi", file=sys.stderr, flush=True)
+
+    return venues
