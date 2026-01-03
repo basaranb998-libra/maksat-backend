@@ -8,6 +8,7 @@ from django.conf import settings
 import googlemaps
 import google.generativeai as genai
 import urllib.parse
+import time
 from .instagram_service import discover_instagram_url, find_instagram_simple
 from .gault_millau_data import enrich_venues_with_gault_millau, get_gm_restaurants_for_category as get_static_gm_restaurants
 from .popular_venues_data import enrich_venues_with_instagram
