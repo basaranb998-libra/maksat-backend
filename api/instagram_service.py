@@ -275,26 +275,41 @@ def search_instagram_google(venue_name: str, city: str, district: str = None, ne
     """
     Google Custom Search API kullanarak Instagram URL'si bul.
 
-    Önce semt/mahalle ile ara (daha spesifik), sonra şehir ile ara.
+    Strateji:
+    1. Önce site:instagram.com ile ara - doğrudan profil sayfalarını bul
+    2. Birden fazla sorgu kombinasyonu dene
+    3. Sonuçları akıllıca filtrele
     """
     if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
         # API key yoksa sessizce geç
         return None
 
-    # Birden fazla sorgu dene - en spesifikten en genele
+    # Mekan adını temizle (parantez içi bilgileri çıkar)
+    clean_name = re.sub(r'\s*\([^)]*\)', '', venue_name).strip()
+
+    # Birden fazla sorgu dene - farklı kombinasyonlar
     queries = []
 
-    # 1. Semt/mahalle ile ara (en spesifik)
+    # 1. EN ÖNEMLİ: Doğrudan Instagram profil araması
+    # "baristocrat istanbul instagram" gibi sorgular en iyi sonuç verir
+    queries.append(f'site:instagram.com "{clean_name}" {city}')
+    queries.append(f'site:instagram.com {clean_name} {city}')
+
+    # 2. Semt/mahalle ile ara (daha spesifik)
     if neighborhood:
-        queries.append(f"{venue_name} {neighborhood} instagram")
+        queries.append(f'site:instagram.com "{clean_name}" {neighborhood}')
     if district:
-        queries.append(f"{venue_name} {district} instagram")
+        queries.append(f'site:instagram.com "{clean_name}" {district}')
 
-    # 2. Şehir ile ara
-    queries.append(f"{venue_name} {city} instagram")
+    # 3. Sadece mekan adı ile (tırnak içinde - exact match)
+    queries.append(f'site:instagram.com "{clean_name}"')
 
-    # 3. Sadece mekan adı ile ara
-    queries.append(f"{venue_name} instagram")
+    # 4. Klasik arama (fallback)
+    queries.append(f'{clean_name} {city} instagram resmi hesap')
+    queries.append(f'{clean_name} instagram')
+
+    seen_usernames = set()
+    candidates = []  # (score, username, source_query) tuple'ları
 
     for query in queries:
         try:
@@ -303,38 +318,113 @@ def search_instagram_google(venue_name: str, city: str, district: str = None, ne
                 'key': GOOGLE_API_KEY,
                 'cx': GOOGLE_CSE_ID,
                 'q': query,
-                'num': 5,
-                'siteSearch': 'instagram.com',
-                'siteSearchFilter': 'i',  # include only instagram.com
+                'num': 10,  # Daha fazla sonuç al
             }
 
-            response = requests.get(url, params=params, timeout=5)
+            # site: operatörü kullanmıyorsak siteSearch ekle
+            if 'site:instagram.com' not in query:
+                params['siteSearch'] = 'instagram.com'
+                params['siteSearchFilter'] = 'i'
+
+            response = requests.get(url, params=params, timeout=8)
 
             if response.status_code == 200:
                 data = response.json()
                 items = data.get('items', [])
 
-                for item in items:
+                for idx, item in enumerate(items):
                     link = item.get('link', '')
                     title = item.get('title', '').lower()
+                    snippet = item.get('snippet', '').lower()
 
                     if 'instagram.com/' in link:
                         normalized = normalize_instagram_url(link)
-                        if normalized:
-                            # Mekan adının bir kısmı title'da geçiyor mu kontrol et
-                            venue_words = turkish_to_ascii(venue_name.lower()).split()
-                            title_ascii = turkish_to_ascii(title)
+                        if not normalized:
+                            continue
 
-                            # En az bir kelime eşleşmesi varsa kabul et
-                            match_found = any(word in title_ascii for word in venue_words if len(word) >= 3)
+                        # Username'i çıkar
+                        username_match = re.search(r'instagram\.com/([a-zA-Z0-9_\.]+)', normalized)
+                        if not username_match:
+                            continue
+                        username = username_match.group(1).lower()
 
-                            if match_found or len(items) == 1:
-                                print(f"✅ INSTAGRAM - Found via Google CSE ({query}): {venue_name} -> {normalized}", file=sys.stderr, flush=True)
-                                return normalized
+                        # Zaten gördüysek atla
+                        if username in seen_usernames:
+                            continue
+                        seen_usernames.add(username)
+
+                        # Skor hesapla
+                        score = 0
+
+                        # Mekan adı eşleşmesi (en önemli)
+                        venue_words = turkish_to_ascii(clean_name.lower()).split()
+                        title_ascii = turkish_to_ascii(title)
+                        snippet_ascii = turkish_to_ascii(snippet)
+
+                        # Title'da kaç kelime eşleşiyor?
+                        title_matches = sum(1 for word in venue_words if len(word) >= 3 and word in title_ascii)
+                        score += title_matches * 30
+
+                        # Snippet'ta eşleşme
+                        snippet_matches = sum(1 for word in venue_words if len(word) >= 3 and word in snippet_ascii)
+                        score += snippet_matches * 10
+
+                        # Username'de mekan adı geçiyor mu?
+                        username_ascii = turkish_to_ascii(username)
+                        for word in venue_words:
+                            if len(word) >= 3 and word in username_ascii:
+                                score += 25
+
+                        # Şehir adı eşleşmesi (username'de veya title'da)
+                        city_ascii = turkish_to_ascii(city.lower())
+                        if city_ascii in username_ascii:
+                            score += 15
+                        if city_ascii in title_ascii:
+                            score += 10
+                        if city_ascii in snippet_ascii:
+                            score += 5
+
+                        # Semt/mahalle eşleşmesi
+                        if neighborhood:
+                            neighborhood_ascii = turkish_to_ascii(neighborhood.lower())
+                            if neighborhood_ascii in snippet_ascii or neighborhood_ascii in title_ascii:
+                                score += 20
+                        if district:
+                            district_ascii = turkish_to_ascii(district.lower())
+                            if district_ascii in snippet_ascii or district_ascii in title_ascii:
+                                score += 15
+
+                        # Arama sırası bonusu (üstteki sonuçlar daha iyi)
+                        score += max(0, 10 - idx * 2)
+
+                        # "resmi" veya "official" kelimesi geçiyorsa bonus
+                        if 'resmi' in snippet_ascii or 'official' in snippet_ascii or 'official' in username:
+                            score += 20
+
+                        # Çok genel username'leri cezalandır
+                        generic_terms = ['food', 'coffee', 'cafe', 'restaurant', 'bar', 'kitchen']
+                        if username in generic_terms:
+                            score -= 50
+
+                        if score > 0:
+                            candidates.append((score, normalized, query))
+                            print(f"🔍 INSTAGRAM candidate: {username} (score={score}) from query: {query[:50]}...", file=sys.stderr, flush=True)
 
         except Exception as e:
-            print(f"⚠️ INSTAGRAM - Google CSE error ({query}): {e}", file=sys.stderr, flush=True)
+            print(f"⚠️ INSTAGRAM - Google CSE error ({query[:50]}...): {e}", file=sys.stderr, flush=True)
             continue
+
+    # En yüksek skorlu adayı seç
+    if candidates:
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        best_score, best_url, best_query = candidates[0]
+
+        # Minimum skor eşiği (çok düşük skorlu sonuçları kabul etme)
+        if best_score >= 20:
+            print(f"✅ INSTAGRAM - Found via Google (score={best_score}): {venue_name} -> {best_url}", file=sys.stderr, flush=True)
+            return best_url
+        else:
+            print(f"⚠️ INSTAGRAM - Best candidate score too low ({best_score}): {best_url}", file=sys.stderr, flush=True)
 
     return None
 
@@ -385,16 +475,17 @@ def discover_instagram_url(
     website: str = None,
     existing_instagram: str = None,
     district: str = None,
-    neighborhood: str = None
-) -> Optional[str]:
+    neighborhood: str = None,
+    return_verified: bool = False
+):
     """
     Mekanın Instagram URL'sini keşfet.
 
-    Öncelik sırası:
-    1. Mevcut geçerli Instagram URL'si varsa kullan
+    Öncelik sırası (Google Search en güvenilir):
+    1. Google Custom Search ile ara - EN GÜVENİLİR
     2. Website'ten Instagram linki bul
-    3. Google Custom Search ile ara (API key varsa) - semt/mahalle bilgisiyle
-    4. Mekan adından username tahmin et ve doğrula
+    3. Mevcut Instagram URL (Gemini'den gelen) - doğrulanmamış olabilir
+    4. Mekan adından username tahmin et (son çare)
 
     Args:
         venue_name: Mekan adı
@@ -403,9 +494,13 @@ def discover_instagram_url(
         existing_instagram: Mevcut Instagram URL (Gemini'den gelen)
         district: İlçe/semt adı (opsiyonel) - örn: "Konak"
         neighborhood: Mahalle adı (opsiyonel) - örn: "Alsancak"
+        return_verified: True ise tuple döner, False ise sadece URL döner (geriye uyumluluk)
 
     Returns:
-        Geçerli Instagram URL veya None
+        return_verified=False: instagram_url veya None (eski davranış)
+        return_verified=True: tuple (instagram_url, is_verified)
+        - instagram_url: Geçerli Instagram URL veya None
+        - is_verified: Google Search/website ile doğrulandıysa True, tahmin ise False
     """
     # Cache key - semt bilgisini de dahil et
     cache_key = f"{venue_name.lower()}:{city.lower()}:{district or ''}:{neighborhood or ''}"
@@ -417,28 +512,43 @@ def discover_instagram_url(
             cached = _instagram_cache[cache_key]
             if cached:
                 print(f"📦 INSTAGRAM - Cache hit: {venue_name} -> {cached}", file=sys.stderr, flush=True)
+            # Cache'deki değerler doğrulanmış kabul edilir
+            if return_verified:
+                return cached, True
             return cached
 
     instagram_url = None
+    is_verified = False
 
-    # 1. Mevcut Instagram URL geçerli mi?
-    if existing_instagram:
-        normalized = normalize_instagram_url(existing_instagram)
-        if normalized:
-            instagram_url = normalized
-            print(f"✅ INSTAGRAM - Using existing: {venue_name} -> {instagram_url}", file=sys.stderr, flush=True)
+    # 1. Google Custom Search ile ara - EN GÜVENİLİR YÖNTEM
+    # "baristocrat istanbul" araması -> "baristocrat3rd" bulur
+    if GOOGLE_API_KEY and GOOGLE_CSE_ID:
+        instagram_url = search_instagram_google(venue_name, city, district, neighborhood)
+        if instagram_url:
+            is_verified = True
+            print(f"✅ INSTAGRAM - Verified via Google Search: {venue_name} -> {instagram_url}", file=sys.stderr, flush=True)
 
     # 2. Website'ten Instagram linki bul
     if not instagram_url and website:
         instagram_url = find_instagram_from_website(website)
+        if instagram_url:
+            is_verified = True  # Website'ten gelen de güvenilir
 
-    # 3. Google Custom Search ile ara (API key varsa) - semt/mahalle bilgisiyle daha iyi sonuç
-    if not instagram_url and GOOGLE_API_KEY and GOOGLE_CSE_ID:
-        instagram_url = search_instagram_google(venue_name, city, district, neighborhood)
+    # 3. Mevcut Instagram URL (Gemini'den) - doğrulanmamış olabilir
+    # Google Search bulamadıysa ama Gemini vermiş olabilir
+    if not instagram_url and existing_instagram:
+        normalized = normalize_instagram_url(existing_instagram)
+        if normalized:
+            instagram_url = normalized
+            is_verified = False  # Gemini'den gelen doğrulanmamış
+            print(f"⚠️ INSTAGRAM - Using unverified (from Gemini): {venue_name} -> {instagram_url}", file=sys.stderr, flush=True)
 
-    # 4. Mekan adından tahmin et (şehir eklentili varyantlar - ledimancheizmir gibi)
+    # 4. Mekan adından tahmin et (son çare - düşük güvenilirlik)
     if not instagram_url:
         instagram_url = guess_instagram_from_name(venue_name, city)
+        if instagram_url:
+            is_verified = False  # Tahmin, doğrulanmamış
+            print(f"⚠️ INSTAGRAM - Guessed (unverified): {venue_name} -> {instagram_url}", file=sys.stderr, flush=True)
 
     # Cache'e kaydet (None da dahil - negatif cache, ama daha kısa süre)
     _instagram_cache[cache_key] = instagram_url
@@ -449,10 +559,12 @@ def discover_instagram_url(
     if not instagram_url:
         print(f"⚠️ INSTAGRAM - Not found: {venue_name}", file=sys.stderr, flush=True)
 
+    if return_verified:
+        return instagram_url, is_verified
     return instagram_url
 
 
-def batch_discover_instagram(venues: list, city: str) -> Dict[str, str]:
+def batch_discover_instagram(venues: list, city: str) -> Dict[str, tuple[str, bool]]:
     """
     Birden fazla mekan için Instagram URL'lerini toplu keşfet.
 
@@ -461,7 +573,7 @@ def batch_discover_instagram(venues: list, city: str) -> Dict[str, str]:
         city: Şehir adı
 
     Returns:
-        {venue_name: instagram_url} dictionary
+        {venue_name: (instagram_url, is_verified)} dictionary
     """
     results = {}
 
@@ -470,14 +582,15 @@ def batch_discover_instagram(venues: list, city: str) -> Dict[str, str]:
         if not name:
             continue
 
-        instagram_url = discover_instagram_url(
+        instagram_url, is_verified = discover_instagram_url(
             venue_name=name,
             city=city,
             website=venue.get('website'),
-            existing_instagram=venue.get('instagramUrl')
+            existing_instagram=venue.get('instagramUrl'),
+            return_verified=True
         )
 
         if instagram_url:
-            results[name] = instagram_url
+            results[name] = (instagram_url, is_verified)
 
     return results

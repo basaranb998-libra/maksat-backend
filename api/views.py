@@ -3226,40 +3226,23 @@ SADECE JSON array döndür, başka açıklama ekleme. [{{}}, {{}}, ...]"""
 
                         final_venues.append(venue)
 
-                    # Gemini Instagram bulamadıysa, önce Google CSE ile ara, sonra tahmin et
-                    from .instagram_service import generate_username_variants
+                    # Gemini Instagram bulamadıysa, Google CSE + tahmin ile bul
                     for venue in final_venues:
                         if not venue.get('instagramUrl'):
-                            # Önce Google CSE ile ara (semt bilgisiyle)
-                            google_instagram = discover_instagram_url(
+                            instagram_url, is_verified = discover_instagram_url(
                                 venue_name=venue['name'],
                                 city=city,
                                 website=venue.get('website'),
                                 existing_instagram=None,
                                 district=selected_district,
-                                neighborhood=selected_neighborhood
+                                neighborhood=selected_neighborhood,
+                                return_verified=True
                             )
-                            if google_instagram:
-                                venue['instagramUrl'] = google_instagram
-                                venue['instagramEstimated'] = False  # Google CSE buldu
-                                print(f"📸 Bar Instagram (Google CSE): {venue['name']} -> {google_instagram}", file=sys.stderr, flush=True)
-                            else:
-                                # Google CSE bulamadıysa username'den tahmin et
-                                variants = generate_username_variants(venue['name'])
-                                if variants:
-                                    # En iyi varyantı seç: özel karaktersiz, prefix'siz, en uzun
-                                    clean_variants = [v for v in variants if
-                                        '.' not in v and '_' not in v and
-                                        not v.startswith('the') and
-                                        'official' not in v and
-                                        not v.endswith('tr')]
-                                    if clean_variants:
-                                        best_variant = max(clean_variants, key=len)
-                                    else:
-                                        best_variant = max(variants, key=len)
-                                    venue['instagramUrl'] = f"https://instagram.com/{best_variant}"
-                                    venue['instagramEstimated'] = True  # Tahmin edilen
-                                    print(f"📸 Bar Instagram fallback: {venue['name']} -> {best_variant}", file=sys.stderr, flush=True)
+                            if instagram_url:
+                                venue['instagramUrl'] = instagram_url
+                                venue['instagramEstimated'] = not is_verified
+                                status = "verified" if is_verified else "estimated"
+                                print(f"📸 Bar Instagram ({status}): {venue['name']} -> {instagram_url}", file=sys.stderr, flush=True)
 
                     print(f"✅ Gemini ile {len(final_venues)} Bar mekanı zenginleştirildi", file=sys.stderr, flush=True)
 
@@ -3736,39 +3719,23 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
                         final_venues.append(venue)
 
-                    # Gemini Instagram bulamadıysa, önce Google CSE ile ara, sonra tahmin et
+                    # Gemini Instagram bulamadıysa, Google CSE + tahmin ile bul
                     for venue in final_venues:
                         if not venue.get('instagramUrl'):
-                            # Önce Google CSE ile ara (semt bilgisiyle)
-                            google_instagram = discover_instagram_url(
+                            instagram_url, is_verified = discover_instagram_url(
                                 venue_name=venue['name'],
                                 city=city,
                                 website=venue.get('website'),
                                 existing_instagram=None,
                                 district=selected_district,
-                                neighborhood=selected_neighborhood
+                                neighborhood=selected_neighborhood,
+                                return_verified=True
                             )
-                            if google_instagram:
-                                venue['instagramUrl'] = google_instagram
-                                venue['instagramEstimated'] = False  # Google CSE buldu
-                                print(f"📸 Sokak Lezzeti Instagram (Google CSE): {venue['name']} -> {google_instagram}", file=sys.stderr, flush=True)
-                            else:
-                                # Google CSE bulamadıysa username'den tahmin et
-                                variants = generate_username_variants(venue['name'])
-                                if variants:
-                                    # En iyi varyantı seç: özel karaktersiz, prefix'siz, en uzun
-                                    clean_variants = [v for v in variants if
-                                        '.' not in v and '_' not in v and
-                                        not v.startswith('the') and
-                                        'official' not in v and
-                                        not v.endswith('tr')]
-                                    if clean_variants:
-                                        best_variant = max(clean_variants, key=len)
-                                    else:
-                                        best_variant = max(variants, key=len)
-                                    venue['instagramUrl'] = f"https://instagram.com/{best_variant}"
-                                    venue['instagramEstimated'] = True  # Tahmin edilen
-                                    print(f"📸 Sokak Lezzeti Instagram fallback: {venue['name']} -> {best_variant}", file=sys.stderr, flush=True)
+                            if instagram_url:
+                                venue['instagramUrl'] = instagram_url
+                                venue['instagramEstimated'] = not is_verified
+                                status = "verified" if is_verified else "estimated"
+                                print(f"📸 Sokak Lezzeti Instagram ({status}): {venue['name']} -> {instagram_url}", file=sys.stderr, flush=True)
 
                     print(f"✅ Gemini ile {len(final_venues)} Sokak Lezzeti mekan zenginleştirildi", file=sys.stderr, flush=True)
 
@@ -4152,44 +4119,25 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                                 venue['instagramUrl'] = f"https://instagram.com/{instagram_username}"
                                 venue['instagramEstimated'] = False  # Gemini buldu, doğrulanmış
 
-                    # Gemini Instagram bulamadıysa, önce Google CSE ile ara, sonra tahmin et
-                    from .instagram_service import generate_username_variants
+                    # Gemini Instagram bulamadıysa, Google CSE + tahmin ile bul
                     for venue in venues:
                         if not venue.get('instagramUrl'):
-                            # Önce Google CSE ile ara (semt bilgisiyle)
-                            google_instagram = discover_instagram_url(
+                            # discover_instagram_url artık Google Search'ü öncelikli kullanıyor
+                            # ve doğrulama bilgisini de dönüyor
+                            instagram_url, is_verified = discover_instagram_url(
                                 venue_name=venue['name'],
                                 city=city,
                                 website=venue.get('website'),
                                 existing_instagram=None,
                                 district=selected_district,
-                                neighborhood=selected_neighborhood
+                                neighborhood=selected_neighborhood,
+                                return_verified=True
                             )
-                            if google_instagram:
-                                venue['instagramUrl'] = google_instagram
-                                venue['instagramEstimated'] = False  # Google CSE buldu
-                                print(f"📸 3. Nesil Kahveci Instagram (Google CSE): {venue['name']} -> {google_instagram}", file=sys.stderr, flush=True)
-                            else:
-                                # Google CSE bulamadıysa username'den tahmin et
-                                variants = generate_username_variants(venue['name'])  # Şehir yok
-                                if variants:
-                                    # En iyi varyantı seç: özel karaktersiz, prefix'siz, en uzun
-                                    best_variant = None
-                                    # Önce temiz olanları filtrele (nokta, alt çizgi, the, official, tr yok)
-                                    clean_variants = [v for v in variants if
-                                        '.' not in v and '_' not in v and
-                                        not v.startswith('the') and
-                                        'official' not in v and
-                                        not v.endswith('tr')]
-                                    # Temizlerden en uzunu
-                                    if clean_variants:
-                                        best_variant = max(clean_variants, key=len)
-                                    else:
-                                        # Temiz yoksa en uzun varyant
-                                        best_variant = max(variants, key=len)
-                                    venue['instagramUrl'] = f"https://instagram.com/{best_variant}"
-                                    venue['instagramEstimated'] = True  # Tahmin edilen, kullanıcı düzeltebilir
-                                    print(f"📸 3. Nesil Kahveci Instagram fallback: {venue['name']} -> {best_variant}", file=sys.stderr, flush=True)
+                            if instagram_url:
+                                venue['instagramUrl'] = instagram_url
+                                venue['instagramEstimated'] = not is_verified  # Doğrulanmamışsa True
+                                status = "verified" if is_verified else "estimated"
+                                print(f"📸 3. Nesil Kahveci Instagram ({status}): {venue['name']} -> {instagram_url}", file=sys.stderr, flush=True)
 
                     print(f"✅ Gemini enrichment completed for {len(venues)} venues", file=sys.stderr, flush=True)
 
@@ -4785,39 +4733,23 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
                         final_venues.append(venue)
 
-                    # Gemini Instagram bulamadıysa, önce Google CSE ile ara, sonra tahmin et
+                    # Gemini Instagram bulamadıysa, Google CSE + tahmin ile bul
                     for venue in final_venues:
                         if not venue.get('instagramUrl'):
-                            # Önce Google CSE ile ara (semt bilgisiyle)
-                            google_instagram = discover_instagram_url(
+                            instagram_url, is_verified = discover_instagram_url(
                                 venue_name=venue['name'],
                                 city=city,
                                 website=venue.get('website'),
                                 existing_instagram=None,
                                 district=selected_district,
-                                neighborhood=selected_neighborhood
+                                neighborhood=selected_neighborhood,
+                                return_verified=True
                             )
-                            if google_instagram:
-                                venue['instagramUrl'] = google_instagram
-                                venue['instagramEstimated'] = False  # Google CSE buldu
-                                print(f"📸 Eğlence & Parti Instagram (Google CSE): {venue['name']} -> {google_instagram}", file=sys.stderr, flush=True)
-                            else:
-                                # Google CSE bulamadıysa username'den tahmin et
-                                variants = generate_username_variants(venue['name'])
-                                if variants:
-                                    # En iyi varyantı seç: özel karaktersiz, prefix'siz, en uzun
-                                    clean_variants = [v for v in variants if
-                                        '.' not in v and '_' not in v and
-                                        not v.startswith('the') and
-                                        'official' not in v and
-                                        not v.endswith('tr')]
-                                    if clean_variants:
-                                        best_variant = max(clean_variants, key=len)
-                                    else:
-                                        best_variant = max(variants, key=len)
-                                    venue['instagramUrl'] = f"https://instagram.com/{best_variant}"
-                                    venue['instagramEstimated'] = True  # Tahmin edilen
-                                    print(f"📸 Eğlence & Parti Instagram fallback: {venue['name']} -> {best_variant}", file=sys.stderr, flush=True)
+                            if instagram_url:
+                                venue['instagramUrl'] = instagram_url
+                                venue['instagramEstimated'] = not is_verified
+                                status = "verified" if is_verified else "estimated"
+                                print(f"📸 Eğlence & Parti Instagram ({status}): {venue['name']} -> {instagram_url}", file=sys.stderr, flush=True)
 
                     print(f"✅ Gemini ile {len(final_venues)} Eğlence & Parti mekan zenginleştirildi", file=sys.stderr, flush=True)
 
