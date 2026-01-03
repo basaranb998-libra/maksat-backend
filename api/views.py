@@ -6215,7 +6215,7 @@ def generate_venues(request):
                                   'hızlı', 'yavaş', 'pahalı', 'ucuz', 'fiyat', 'hesap', 'bahçe', 'teras', 'dış mekan']
 
             places_list_items = []
-            for i, p in enumerate(filtered_places[:10]):
+            for i, p in enumerate(filtered_places[:50]):
                 reviews_text = ""
                 if p.get('google_reviews'):
                     all_reviews = p['google_reviews']
@@ -6500,7 +6500,7 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                     # AI sonuçlarını mekanlarla eşleştir
                     ai_by_name = {r.get('name', '').lower(): r for r in ai_results}
 
-                    for place in filtered_places[:10]:
+                    for place in filtered_places[:50]:
                         ai_data = ai_by_name.get(place['name'].lower(), {})
 
                         # Uygun değilse skip
@@ -6587,7 +6587,7 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
             except Exception as e:
                 print(f"❌ Gemini batch hatası: {e}", file=sys.stderr, flush=True)
                 # Fallback: Gemini olmadan mekanları ekle
-                for place in filtered_places[:10]:
+                for place in filtered_places[:50]:
                     venue = {
                         'id': f"v{place['idx'] + 1}",
                         'name': place['name'],
@@ -6663,19 +6663,19 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
             # LOAD MORE: Sadece API'den gelen yeni mekanları döndür
             # excludeIds zaten cache + mevcut mekanları içeriyor, API sadece yenileri getirir
             for av in venues:
-                if len(combined_venues) < 10:
+                if len(combined_venues) < 50:
                     combined_venues.append(av)
             print(f"🔄 LOAD MORE RESULT - API'den {len(combined_venues)} yeni mekan döndürülüyor", file=sys.stderr, flush=True)
         else:
             # NORMAL: Önce cache'ten gelenleri ekle
             for cv in cached_venues:
-                if len(combined_venues) < 10:
+                if len(combined_venues) < 50:
                     combined_venues.append(cv)
 
             # Sonra API'den gelenleri ekle (tekrar olmaması için ID kontrolü yap)
             existing_ids = {v.get('id') for v in combined_venues}
             for av in venues:
-                if len(combined_venues) < 10 and av.get('id') not in existing_ids:
+                if len(combined_venues) < 50 and av.get('id') not in existing_ids:
                     combined_venues.append(av)
                     existing_ids.add(av.get('id'))
 
@@ -6690,7 +6690,7 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
             # combined_venues'dan G&M ID'lerini çıkar (duplicate önleme)
             combined_venues = [v for v in combined_venues if v.get('id') not in gm_ids]
             # G&M'leri başa ekle, kalan slotları doldur
-            remaining_slots = 10 - len(enriched_gm)
+            remaining_slots = 50 - len(enriched_gm)
             combined_venues = enriched_gm + combined_venues[:remaining_slots]
             print(f"🏆 G&M PREPEND (HYBRID) - {len(enriched_gm)} G&M venue başa eklendi (Gemini zenginleştirildi)", file=sys.stderr, flush=True)
 
