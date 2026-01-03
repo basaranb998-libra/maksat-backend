@@ -594,3 +594,49 @@ def batch_discover_instagram(venues: list, city: str) -> Dict[str, tuple[str, bo
             results[name] = (instagram_url, is_verified)
 
     return results
+
+
+def find_instagram_simple(venue_name: str, neighborhood: str = None, city: str = None) -> Optional[str]:
+    """
+    Sadece Google Search ile Instagram URL bul.
+    Tahmin yok, generate yok, Gemini yok.
+    Meyhane kategorisi için basit ve hızlı yöntem.
+    """
+    if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
+        return None
+
+    # Sorgu oluştur - mahalle öncelikli
+    if neighborhood:
+        query = f'site:instagram.com "{venue_name}" {neighborhood}'
+    elif city:
+        query = f'site:instagram.com "{venue_name}" {city}'
+    else:
+        query = f'site:instagram.com "{venue_name}"'
+
+    try:
+        response = requests.get(
+            "https://www.googleapis.com/customsearch/v1",
+            params={
+                'key': GOOGLE_API_KEY,
+                'cx': GOOGLE_CSE_ID,
+                'q': query,
+                'num': 3
+            },
+            timeout=5
+        )
+
+        if response.status_code == 200:
+            for item in response.json().get('items', []):
+                link = item.get('link', '')
+                match = re.search(r'instagram\.com/([a-zA-Z0-9_.]+)', link)
+                if match:
+                    username = match.group(1)
+                    # Geçersiz path'leri filtrele
+                    if username.lower() not in ['p', 'reel', 'reels', 'stories', 'explore']:
+                        instagram_url = f"https://instagram.com/{username}"
+                        print(f"✅ INSTAGRAM (simple): {venue_name} -> {instagram_url}", file=sys.stderr, flush=True)
+                        return instagram_url
+    except Exception as e:
+        print(f"⚠️ INSTAGRAM (simple) error: {e}", file=sys.stderr, flush=True)
+
+    return None
