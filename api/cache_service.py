@@ -2,9 +2,9 @@
 Stale-While-Revalidate (SWR) Cache Service
 
 Freshness Rules:
-- 0-12 saat: FRESH (direkt cache'ten dön)
-- 12-24 saat: STALE (cache'ten dön, arka planda refresh)
-- 24+ saat: EXPIRED (API'ye git, yeni cache oluştur)
+- 0-24 saat: FRESH (direkt cache'ten dön)
+- 24-96 saat: STALE (cache'ten dön, arka planda refresh)
+- 96+ saat: EXPIRED (API'ye git, yeni cache oluştur)
 """
 
 import threading
@@ -20,8 +20,8 @@ from .popular_venues_data import enrich_venues_with_instagram
 # ===== CONFIGURATION =====
 # Dengeli cache stratejisi: Güncel kalma vs API maliyeti
 CACHE_FRESH_HOURS = 24      # 0-24 saat: Fresh (direkt cache'ten dön)
-CACHE_STALE_HOURS = 48      # 24-48 saat: Stale (cache'ten dön, arka planda refresh)
-CACHE_EXPIRED_HOURS = 48    # 48+ saat: Expired (API'ye git)
+CACHE_STALE_HOURS = 96      # 24-96 saat: Stale (cache'ten dön, arka planda refresh)
+CACHE_EXPIRED_HOURS = 96    # 96+ saat: Expired (API'ye git)
 
 # In-memory set to track ongoing refresh operations
 _refresh_in_progress: Set[str] = set()

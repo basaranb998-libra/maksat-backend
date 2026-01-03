@@ -853,9 +853,9 @@ def get_cached_venues_for_hybrid(category_name: str, city: str, district: str = 
     Hybrid sistem için cache'ten venue'ları çeker (SWR stratejisi ile).
 
     Freshness Rules:
-    - 0-12 saat: FRESH (direkt cache'ten dön)
-    - 12-24 saat: STALE (cache'ten dön, arka planda refresh başlat)
-    - 24+ saat: EXPIRED (API'ye git, yeni cache oluştur)
+    - 0-24 saat: FRESH (direkt cache'ten dön)
+    - 24-96 saat: STALE (cache'ten dön, arka planda refresh başlat)
+    - 96+ saat: EXPIRED (API'ye git, yeni cache oluştur)
 
     Returns: (venues_list, all_cached_place_ids)
     """
@@ -1505,6 +1505,19 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
                         if response.status_code == 200:
                             places_data = response.json()
                             places_list = places_data.get('results', [])
+
+                            # Pagination: 2. ve 3. sayfaları da al
+                            for page_num in range(2, 4):
+                                next_page_token = places_data.get('next_page_token')
+                                if not next_page_token:
+                                    break
+                                time.sleep(2)
+                                next_params = {"pagetoken": next_page_token, "key": settings.GOOGLE_MAPS_API_KEY}
+                                next_response = requests.get(url, params=next_params)
+                                if next_response.status_code == 200:
+                                    next_data = next_response.json()
+                                    places_list.extend(next_data.get('results', []))
+                                    places_data = next_data
 
                             for place in places_list:
                                 place_name = place.get('name', '')
@@ -2532,6 +2545,19 @@ def generate_picnic_experiences(location, filters):
                 data = response.json()
                 places = data.get('results', [])
 
+                # Pagination: 2. ve 3. sayfaları da al
+                for page_num in range(2, 4):
+                    next_page_token = data.get('next_page_token')
+                    if not next_page_token:
+                        break
+                    time.sleep(2)
+                    next_params = {"pagetoken": next_page_token, "key": google_api_key}
+                    next_response = requests.get(search_url, params=next_params)
+                    if next_response.status_code == 200:
+                        next_data = next_response.json()
+                        places.extend(next_data.get('results', []))
+                        data = next_data
+
                 for place in places:
                     place_id = place.get('place_id')
                     if place_id and place_id not in seen_place_ids:
@@ -2982,6 +3008,19 @@ def generate_bar_venues(location, filters, exclude_ids):
                 data = response.json()
                 places = data.get('results', [])
 
+                # Pagination: 2. ve 3. sayfaları da al
+                for page_num in range(2, 4):
+                    next_page_token = data.get('next_page_token')
+                    if not next_page_token:
+                        break
+                    time.sleep(2)
+                    next_params = {"pagetoken": next_page_token, "key": google_api_key}
+                    next_response = requests.get(api_url, params=next_params, timeout=10)
+                    if next_response.status_code == 200:
+                        next_data = next_response.json()
+                        places.extend(next_data.get('results', []))
+                        data = next_data
+
                 for place in places:
                     place_id = place.get('place_id', '')
                     if place_id in seen_place_ids:
@@ -3408,6 +3447,19 @@ def generate_street_food_places(location, filters, exclude_ids):
 
                 places_data = response.json()
                 places = places_data.get('results', [])
+
+                # Pagination: 2. ve 3. sayfaları da al
+                for page_num in range(2, 4):
+                    next_page_token = places_data.get('next_page_token')
+                    if not next_page_token:
+                        break
+                    time.sleep(2)
+                    next_params = {"pagetoken": next_page_token, "key": settings.GOOGLE_MAPS_API_KEY}
+                    next_response = requests.get(url, params=next_params)
+                    if next_response.status_code == 200:
+                        next_data = next_response.json()
+                        places.extend(next_data.get('results', []))
+                        places_data = next_data
 
                 for place in places:
                     place_id = place.get('place_id', '')
@@ -3907,6 +3959,19 @@ def generate_specialty_coffee_places(location, filters, exclude_ids):
                 places_data = response.json()
                 places = places_data.get('results', [])
 
+                # Pagination: 2. ve 3. sayfaları da al
+                for page_num in range(2, 4):
+                    next_page_token = places_data.get('next_page_token')
+                    if not next_page_token:
+                        break
+                    time.sleep(2)
+                    next_params = {"pagetoken": next_page_token, "key": settings.GOOGLE_MAPS_API_KEY}
+                    next_response = requests.get(url, params=next_params)
+                    if next_response.status_code == 200:
+                        next_data = next_response.json()
+                        places.extend(next_data.get('results', []))
+                        places_data = next_data
+
                 for place in places:
                     place_id = place.get('place_id', '')
                     place_name = place.get('name', '')
@@ -4308,6 +4373,19 @@ def generate_party_venues(location, filters, exclude_ids):
 
                 places_data = response.json()
                 places = places_data.get('results', [])
+
+                # Pagination: 2. ve 3. sayfaları da al
+                for page_num in range(2, 4):
+                    next_page_token = places_data.get('next_page_token')
+                    if not next_page_token:
+                        break
+                    time.sleep(2)
+                    next_params = {"pagetoken": next_page_token, "key": settings.GOOGLE_MAPS_API_KEY}
+                    next_response = requests.get(url, params=next_params)
+                    if next_response.status_code == 200:
+                        next_data = next_response.json()
+                        places.extend(next_data.get('results', []))
+                        places_data = next_data
 
                 for place in places:
                     place_id = place.get('place_id', '')
@@ -5427,11 +5505,41 @@ def generate_venues(request):
 
                     print(f"DEBUG - Google Places API Query: {params['query']}", file=sys.stderr, flush=True)
 
+                    all_results = []
                     response = requests.get(url, params=params)
 
                     if response.status_code == 200:
                         places_data = response.json()
-                        places_result = {'results': places_data.get('results', [])}
+                        all_results.extend(places_data.get('results', []))
+                        print(f"📄 Text Search sayfa 1: {len(places_data.get('results', []))} sonuç", file=sys.stderr, flush=True)
+
+                        # Pagination: 2. ve 3. sayfaları da al (toplam ~60 sonuç için)
+                        import time
+                        for page_num in range(2, 4):  # 2. ve 3. sayfa
+                            next_page_token = places_data.get('next_page_token')
+                            if not next_page_token:
+                                break
+
+                            # Google API next_page_token için kısa bekleme gerektiriyor
+                            time.sleep(2)
+
+                            next_params = {
+                                "pagetoken": next_page_token,
+                                "key": settings.GOOGLE_MAPS_API_KEY
+                            }
+                            next_response = requests.get(url, params=next_params)
+
+                            if next_response.status_code == 200:
+                                next_data = next_response.json()
+                                all_results.extend(next_data.get('results', []))
+                                places_data = next_data  # Sonraki sayfa için token'ı güncelle
+                                print(f"📄 Text Search sayfa {page_num}: {len(next_data.get('results', []))} sonuç", file=sys.stderr, flush=True)
+                            else:
+                                print(f"❌ Text Search sayfa {page_num} hatası: {next_response.status_code}", file=sys.stderr, flush=True)
+                                break
+
+                        places_result = {'results': all_results}
+                        print(f"✅ Text Search toplam: {len(all_results)} sonuç", file=sys.stderr, flush=True)
                     else:
                         print(f"❌ Places API hatası: {response.status_code} - {response.text}", file=sys.stderr, flush=True)
 
@@ -5448,7 +5556,7 @@ def generate_venues(request):
         filtered_places = []
         alcohol_filter = filters.get('alcohol', 'Any')
 
-        for idx, place in enumerate(places_result.get('results', [])[:20]):
+        for idx, place in enumerate(places_result.get('results', [])[:50]):
             place_id = place.get('place_id', f"place_{idx}")
             place_name = place.get('name', '')
             place_address = place.get('formatted_address', '')
