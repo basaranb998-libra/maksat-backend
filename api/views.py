@@ -1352,6 +1352,25 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
 
     print(f"🍽️ Fine Dining + Michelin araması: {search_locations}", file=sys.stderr, flush=True)
 
+    # Her lokasyon için koordinatları al (location bias için)
+    location_coords_map = {}
+    for search_loc in search_locations:
+        try:
+            geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+            geocode_params = {
+                "address": f"{search_loc}, Turkey",
+                "key": settings.GOOGLE_MAPS_API_KEY
+            }
+            geocode_response = requests.get(geocode_url, params=geocode_params)
+            if geocode_response.status_code == 200:
+                geocode_data = geocode_response.json()
+                if geocode_data.get('results'):
+                    coords = geocode_data['results'][0]['geometry']['location']
+                    location_coords_map[search_loc] = (coords['lat'], coords['lng'])
+                    print(f"🗺️ Fine Dining location bias: {search_loc} -> ({coords['lat']}, {coords['lng']})", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"⚠️ Geocode hatası ({search_loc}): {e}", file=sys.stderr, flush=True)
+
     # Michelin Guide Türkiye 2024 - İlgili şehir için
     MICHELIN_DATABASE = {
         "İstanbul": [
@@ -1498,7 +1517,14 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
                         "language": "tr",
                         "key": settings.GOOGLE_MAPS_API_KEY
                     }
-                    print(f"🔍 Fine dining araması: {query}", file=sys.stderr, flush=True)
+
+                    # Location bias ekle (koordinatlar alındıysa)
+                    if search_loc in location_coords_map:
+                        lat, lng = location_coords_map[search_loc]
+                        params["location"] = f"{lat},{lng}"
+                        params["radius"] = 3000  # 3km yarıçap
+
+                    print(f"🔍 Fine dining araması: {query} (location bias: {search_loc in location_coords_map})", file=sys.stderr, flush=True)
 
                     try:
                         response = requests.get(url, params=params)
@@ -2517,6 +2543,24 @@ def generate_picnic_experiences(location, filters):
 
     print(f"🌲 Piknik alanı araması (Google Places): {location_query}", file=sys.stderr, flush=True)
 
+    # Lokasyonun koordinatlarını al (location bias için)
+    location_lat, location_lng = None, None
+    try:
+        geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+        geocode_params = {
+            "address": f"{location_query}, Turkey",
+            "key": google_api_key
+        }
+        geocode_response = requests.get(geocode_url, params=geocode_params)
+        if geocode_response.status_code == 200:
+            geocode_data = geocode_response.json()
+            if geocode_data.get('results'):
+                location_coords = geocode_data['results'][0]['geometry']['location']
+                location_lat, location_lng = location_coords['lat'], location_coords['lng']
+                print(f"🗺️ Piknik location bias: {location_query} -> ({location_lat}, {location_lng})", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"⚠️ Geocode hatası: {e}", file=sys.stderr, flush=True)
+
     try:
         # Piknik için aranacak yer türleri - birden fazla sorgu yapalım
         picnic_queries = [
@@ -2539,6 +2583,11 @@ def generate_picnic_experiences(location, filters):
                 'language': 'tr',
                 'type': 'park'  # Park türünde yerler
             }
+
+            # Location bias ekle (koordinatlar alındıysa)
+            if location_lat and location_lng:
+                search_params["location"] = f"{location_lat},{location_lng}"
+                search_params["radius"] = 10000  # 10km yarıçap (piknik alanları daha geniş alanda olabilir)
 
             response = requests.get(search_url, params=search_params)
             if response.status_code == 200:
@@ -2983,13 +3032,31 @@ def generate_bar_venues(location, filters, exclude_ids):
     all_venues = []
     seen_place_ids = set(api_exclude_ids)  # Duplicate önleme
 
+    # Lokasyonun koordinatlarını al (location bias için)
+    location_lat, location_lng = None, None
+    try:
+        geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+        geocode_params = {
+            "address": f"{search_location}, Turkey",
+            "key": google_api_key
+        }
+        geocode_response = requests.get(geocode_url, params=geocode_params)
+        if geocode_response.status_code == 200:
+            geocode_data = geocode_response.json()
+            if geocode_data.get('results'):
+                location_coords = geocode_data['results'][0]['geometry']['location']
+                location_lat, location_lng = location_coords['lat'], location_coords['lng']
+                print(f"🗺️ İş Çıkışı Bar location bias: {search_location} -> ({location_lat}, {location_lng})", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"⚠️ Geocode hatası: {e}", file=sys.stderr, flush=True)
+
     try:
         for query_term, bar_type in bar_queries:
             if len(all_venues) >= 15:  # Yeterli mekan bulundu
                 break
 
             search_query = f"{query_term} {search_location}"
-            print(f"🔍 Bar Query: {search_query}", file=sys.stderr, flush=True)
+            print(f"🔍 Bar Query: {search_query} (location bias: {location_lat is not None})", file=sys.stderr, flush=True)
 
             # Google Places API Text Search (Legacy)
             api_url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
@@ -2998,6 +3065,11 @@ def generate_bar_venues(location, filters, exclude_ids):
                 'language': 'tr',
                 'key': google_api_key
             }
+
+            # Location bias ekle (koordinatlar alındıysa)
+            if location_lat and location_lng:
+                params["location"] = f"{location_lat},{location_lng}"
+                params["radius"] = 3000  # 3km yarıçap
 
             try:
                 response = requests.get(api_url, params=params, timeout=10)
@@ -3427,6 +3499,24 @@ def generate_street_food_places(location, filters, exclude_ids):
     venues = []
     added_ids = set()
 
+    # Lokasyonun koordinatlarını al (location bias için)
+    location_lat, location_lng = None, None
+    try:
+        geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+        geocode_params = {
+            "address": f"{search_location}, Turkey",
+            "key": settings.GOOGLE_MAPS_API_KEY
+        }
+        geocode_response = requests.get(geocode_url, params=geocode_params)
+        if geocode_response.status_code == 200:
+            geocode_data = geocode_response.json()
+            if geocode_data.get('results'):
+                location_coords = geocode_data['results'][0]['geometry']['location']
+                location_lat, location_lng = location_coords['lat'], location_coords['lng']
+                print(f"🗺️ Sokak Lezzeti location bias: {search_location} -> ({location_lat}, {location_lng})", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"⚠️ Geocode hatası: {e}", file=sys.stderr, flush=True)
+
     try:
         for query_term, food_type in street_food_queries:
             try:
@@ -3437,7 +3527,12 @@ def generate_street_food_places(location, filters, exclude_ids):
                     "key": settings.GOOGLE_MAPS_API_KEY
                 }
 
-                print(f"🔍 Sorgu: {query_term} in {search_location}", file=sys.stderr, flush=True)
+                # Location bias ekle (koordinatlar alındıysa)
+                if location_lat and location_lng:
+                    params["location"] = f"{location_lat},{location_lng}"
+                    params["radius"] = 3000  # 3km yarıçap
+
+                print(f"🔍 Sorgu: {query_term} in {search_location} (location bias: {location_lat is not None})", file=sys.stderr, flush=True)
 
                 response = requests.get(url, params=params)
 
@@ -3938,6 +4033,24 @@ def generate_specialty_coffee_places(location, filters, exclude_ids):
     venues = []
     added_ids = set()
 
+    # Lokasyonun koordinatlarını al (location bias için)
+    location_lat, location_lng = None, None
+    try:
+        geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+        geocode_params = {
+            "address": f"{search_location}, Turkey",
+            "key": settings.GOOGLE_MAPS_API_KEY
+        }
+        geocode_response = requests.get(geocode_url, params=geocode_params)
+        if geocode_response.status_code == 200:
+            geocode_data = geocode_response.json()
+            if geocode_data.get('results'):
+                location_coords = geocode_data['results'][0]['geometry']['location']
+                location_lat, location_lng = location_coords['lat'], location_coords['lng']
+                print(f"🗺️ 3. Nesil Kahveci location bias: {search_location} -> ({location_lat}, {location_lng})", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"⚠️ Geocode hatası: {e}", file=sys.stderr, flush=True)
+
     try:
         for query_term, coffee_type in specialty_coffee_queries:
             try:
@@ -3948,7 +4061,12 @@ def generate_specialty_coffee_places(location, filters, exclude_ids):
                     "key": settings.GOOGLE_MAPS_API_KEY
                 }
 
-                print(f"🔍 Sorgu: {query_term} in {search_location}", file=sys.stderr, flush=True)
+                # Location bias ekle (koordinatlar alındıysa)
+                if location_lat and location_lng:
+                    params["location"] = f"{location_lat},{location_lng}"
+                    params["radius"] = 3000  # 3km yarıçap
+
+                print(f"🔍 Sorgu: {query_term} in {search_location} (location bias: {location_lat is not None})", file=sys.stderr, flush=True)
 
                 response = requests.get(url, params=params)
 
@@ -4353,6 +4471,24 @@ def generate_party_venues(location, filters, exclude_ids):
     ]
     party_store_types = ['store', 'shopping_mall', 'home_goods_store', 'furniture_store']
 
+    # Lokasyonun koordinatlarını al (location bias için)
+    location_lat, location_lng = None, None
+    try:
+        geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+        geocode_params = {
+            "address": f"{search_location}, Turkey",
+            "key": settings.GOOGLE_MAPS_API_KEY
+        }
+        geocode_response = requests.get(geocode_url, params=geocode_params)
+        if geocode_response.status_code == 200:
+            geocode_data = geocode_response.json()
+            if geocode_data.get('results'):
+                location_coords = geocode_data['results'][0]['geometry']['location']
+                location_lat, location_lng = location_coords['lat'], location_coords['lng']
+                print(f"🗺️ Eğlence & Parti location bias: {search_location} -> ({location_lat}, {location_lng})", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"⚠️ Geocode hatası: {e}", file=sys.stderr, flush=True)
+
     try:
         for query_term, venue_type in party_queries:
             try:
@@ -4363,7 +4499,12 @@ def generate_party_venues(location, filters, exclude_ids):
                     "key": settings.GOOGLE_MAPS_API_KEY
                 }
 
-                print(f"🔍 Sorgu: {query_term} in {search_location}", file=sys.stderr, flush=True)
+                # Location bias ekle (koordinatlar alındıysa)
+                if location_lat and location_lng:
+                    params["location"] = f"{location_lat},{location_lng}"
+                    params["radius"] = 3000  # 3km yarıçap
+
+                print(f"🔍 Sorgu: {query_term} in {search_location} (location bias: {location_lat is not None})", file=sys.stderr, flush=True)
 
                 response = requests.get(url, params=params)
 
@@ -5477,12 +5618,14 @@ def generate_venues(request):
                                 print(f"✅ Nearby Search sonuç: {len(places_result['results'])} mekan", file=sys.stderr, flush=True)
                             else:
                                 print(f"Nearby Search API hatası: {response.status_code} - {response.text}", file=sys.stderr, flush=True)
-                                # Fallback: Text Search kullan (Legacy API)
+                                # Fallback: Text Search kullan (Legacy API) - location bias ile
                                 url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
                                 params = {
                                     "query": f"{search_query} in {search_location}, Turkey",
                                     "language": "tr",
-                                    "key": settings.GOOGLE_MAPS_API_KEY
+                                    "key": settings.GOOGLE_MAPS_API_KEY,
+                                    "location": f"{lat},{lng}",
+                                    "radius": 3000  # 3km yarıçap
                                 }
                                 response = requests.get(url, params=params)
                                 if response.status_code == 200:
@@ -5496,6 +5639,22 @@ def generate_venues(request):
                         print(f"❌ Geocode hatası: {geocode_response.status_code}", file=sys.stderr, flush=True)
                 else:
                     # Diğer kategoriler için Text Search kullan (Legacy API)
+                    # Önce lokasyonun koordinatlarını al (location bias için)
+                    geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+                    geocode_params = {
+                        "address": f"{search_location}, Turkey",
+                        "key": settings.GOOGLE_MAPS_API_KEY
+                    }
+                    geocode_response = requests.get(geocode_url, params=geocode_params)
+
+                    location_lat, location_lng = None, None
+                    if geocode_response.status_code == 200:
+                        geocode_data = geocode_response.json()
+                        if geocode_data.get('results'):
+                            location_coords = geocode_data['results'][0]['geometry']['location']
+                            location_lat, location_lng = location_coords['lat'], location_coords['lng']
+                            print(f"🗺️ Text Search location bias: {search_location} -> ({location_lat}, {location_lng})", file=sys.stderr, flush=True)
+
                     url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
                     params = {
                         "query": f"{search_query} in {search_location}, Turkey",
@@ -5503,7 +5662,12 @@ def generate_venues(request):
                         "key": settings.GOOGLE_MAPS_API_KEY
                     }
 
-                    print(f"DEBUG - Google Places API Query: {params['query']}", file=sys.stderr, flush=True)
+                    # Location bias ekle (koordinatlar alındıysa)
+                    if location_lat and location_lng:
+                        params["location"] = f"{location_lat},{location_lng}"
+                        params["radius"] = 3000  # 3km yarıçap
+
+                    print(f"DEBUG - Google Places API Query: {params['query']} (location bias: {location_lat is not None})", file=sys.stderr, flush=True)
 
                     all_results = []
                     response = requests.get(url, params=params)
