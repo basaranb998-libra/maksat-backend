@@ -1513,10 +1513,10 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
             url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 
             query_templates = [
-                "fine dining restaurant upscale gourmet in {loc}, Turkey",
-                "italian restaurant trattoria osteria in {loc}, Turkey",
-                "tasting menu degustasyon chef restaurant in {loc}, Turkey",
-                "romantic dinner wine restaurant bistro in {loc}, Turkey",
+                "fine dining restaurant {loc}",
+                "upscale gourmet restaurant {loc}",
+                "tasting menu restaurant {loc}",
+                "chef's table degustasyon {loc}",
             ]
 
             all_places = []
@@ -1536,7 +1536,7 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
                     if search_loc in location_coords_map:
                         lat, lng = location_coords_map[search_loc]
                         params["location"] = f"{lat},{lng}"
-                        params["radius"] = 3000  # 3km yarıçap
+                        params["radius"] = 1500  # 1.5km yarıçap - daha sıkı filtreleme
 
                     print(f"🔍 Fine dining araması: {query} (location bias: {search_loc in location_coords_map})", file=sys.stderr, flush=True)
 
