@@ -9,7 +9,7 @@ import googlemaps
 import google.generativeai as genai
 import urllib.parse
 import time
-from .instagram_service import discover_instagram_url, find_instagram_simple
+from .instagram_service import discover_instagram_url, find_instagram_simple, clear_instagram_cache, get_cse_status
 from .gault_millau_data import enrich_venues_with_gault_millau, get_gm_restaurants_for_category as get_static_gm_restaurants
 from .popular_venues_data import enrich_venues_with_instagram
 
@@ -7219,3 +7219,30 @@ class UserProfileViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(profile)
         return Response(serializer.data)
 
+
+# =====================================================
+# ADMIN / DEBUG ENDPOINT'LERİ
+# =====================================================
+
+@api_view(['POST'])
+def clear_instagram_cache_view(request):
+    """
+    Instagram in-memory cache'ini temizle.
+    Google CSE ile yeni arama yapılmasını sağlar.
+
+    Kullanım: POST /api/admin/clear-instagram-cache/
+    """
+    result = clear_instagram_cache()
+    return Response(result, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+def instagram_cse_status(request):
+    """
+    Google CSE yapılandırma durumunu göster.
+    Debug için kullanılır.
+
+    Kullanım: GET /api/admin/instagram-cse-status/
+    """
+    cse_status = get_cse_status()
+    return Response(cse_status, status=status.HTTP_200_OK)

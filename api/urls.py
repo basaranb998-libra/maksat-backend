@@ -32,6 +32,10 @@ urlpatterns = [
     path('shortlink/', views.create_shortlink, name='create-shortlink'),
     path('shortlink/<str:code>/', views.get_shortlink, name='get-shortlink'),
 
+    # Admin / Debug endpoints
+    path('admin/clear-instagram-cache/', views.clear_instagram_cache_view, name='clear-instagram-cache'),
+    path('admin/instagram-cse-status/', views.instagram_cse_status, name='instagram-cse-status'),
+
     # Router URLs
     path('', include(router.urls)),
 ]

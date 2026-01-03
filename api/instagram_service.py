@@ -603,6 +603,41 @@ def batch_discover_instagram(venues: list, city: str) -> Dict[str, tuple[str, bo
     return results
 
 
+def clear_instagram_cache() -> dict:
+    """
+    Instagram cache'ini temizle.
+    Admin endpoint'i için kullanılır.
+
+    Returns:
+        dict: Temizlenen cache boyutu bilgisi
+    """
+    global _instagram_cache, _cache_expiry
+
+    cache_size = len(_instagram_cache)
+    _instagram_cache = {}
+    _cache_expiry = {}
+
+    print(f"🗑️ INSTAGRAM CACHE CLEARED - {cache_size} entries removed", file=sys.stderr, flush=True)
+
+    return {
+        "cleared_entries": cache_size,
+        "status": "success"
+    }
+
+
+def get_cse_status() -> dict:
+    """
+    Google CSE yapılandırma durumunu döndür.
+    Debug için kullanılır.
+    """
+    return {
+        "google_api_key_set": bool(GOOGLE_API_KEY),
+        "google_cse_id_set": bool(GOOGLE_CSE_ID),
+        "cache_size": len(_instagram_cache),
+        "cache_ttl_days": CACHE_TTL // 86400
+    }
+
+
 def find_instagram_simple(venue_name: str, neighborhood: str = None, city: str = None) -> Optional[str]:
     """
     Sadece Google Search ile Instagram URL bul.
