@@ -873,10 +873,16 @@ def get_cached_venues_for_hybrid(category_name: str, city: str, district: str = 
     return venues_data, all_cached_ids
 
 
-def enrich_cached_venues_with_instagram(venues: list, city: str) -> list:
+def enrich_cached_venues_with_instagram(venues: list, city: str, district: str = None, neighborhood: str = None) -> list:
     """
     Cache'den dönen venue'lara Instagram URL discovery uygula.
     Sadece instagramUrl'si boş olan venue'lar için Google CSE ile arama yapar.
+
+    Args:
+        venues: Venue listesi
+        city: Şehir adı
+        district: İlçe/semt adı (opsiyonel) - örn: "Konak"
+        neighborhood: Mahalle adı (opsiyonel) - örn: "Alsancak"
     """
     if not venues:
         return venues
@@ -893,7 +899,9 @@ def enrich_cached_venues_with_instagram(venues: list, city: str) -> list:
             venue_name=venue.get('name', ''),
             city=city,
             website=venue.get('website'),
-            existing_instagram=existing_instagram if existing_instagram else None
+            existing_instagram=existing_instagram if existing_instagram else None,
+            district=district,
+            neighborhood=neighborhood
         )
 
         if instagram_url:
@@ -3126,7 +3134,7 @@ Her mekan için analiz yap ve JSON döndür:
   "name": "Mekan Adı",
   "description": "2 cümle Türkçe - mekanın öne çıkan özelliği, atmosferi",
   "vibeTags": ["#Tag1", "#Tag2", "#Tag3"],
-  "instagramUrl": "https://instagram.com/kullanici_adi" | null,
+  "instagramUsername": "kullanici_adi" | null,
   "practicalInfo": {{
     "reservationNeeded": "Tavsiye Edilir" | "Şart" | "Gerekli Değil" | null,
     "crowdLevel": "Sakin" | "Orta" | "Kalabalık" | null,
@@ -3145,6 +3153,12 @@ Her mekan için analiz yap ve JSON döndür:
     "oneLiner": "Bir cümle özet"
   }}
 }}
+
+instagramUsername Kuralları:
+- Mekanın resmi Instagram hesabını bul (@ işareti olmadan sadece kullanıcı adı)
+- Türkiye'deki barların Instagram'ı genellikle bar_ismi, barismi, barismi_sehir formatındadır
+- Örnek: "Reset Pub" → "resetpub", "Varuna Gezgin" → "varunagezgin"
+- Bilinen popüler barların Instagram'ını ver. Emin olmadığın için null yaz.
 
 SADECE JSON array döndür, başka açıklama ekleme. [{{}}, {{}}, ...]"""
 
@@ -3193,7 +3207,6 @@ SADECE JSON array döndür, başka açıklama ekleme. [{{}}, {{}}, ...]"""
                             'googleReviews': venue_data.get('googleReviews', []),
                             'website': venue_data.get('website', ''),
                             'hours': venue_data.get('hours', []),
-                            'instagramUrl': ai_data.get('instagramUrl'),
                             'practicalInfo': ai_data.get('practicalInfo', {}),
                             'atmosphereSummary': ai_data.get('atmosphereSummary', {
                                 'noiseLevel': 'Canlı',
@@ -3204,7 +3217,34 @@ SADECE JSON array döndür, başka açıklama ekleme. [{{}}, {{}}, ...]"""
                                 'oneLiner': 'İş çıkışı için ideal bir bar.'
                             })
                         }
+
+                        # Instagram username'i ekle (Gemini'dan)
+                        instagram_username = ai_data.get('instagramUsername')
+                        if instagram_username and instagram_username != 'null' and instagram_username is not None:
+                            venue['instagramUrl'] = f"https://instagram.com/{instagram_username}"
+                            venue['instagramEstimated'] = False  # Gemini buldu, doğrulanmış
+
                         final_venues.append(venue)
+
+                    # Gemini Instagram bulamadıysa, mekan adından tahmin et
+                    from .instagram_service import generate_username_variants
+                    for venue in final_venues:
+                        if not venue.get('instagramUrl'):
+                            variants = generate_username_variants(venue['name'])
+                            if variants:
+                                # En iyi varyantı seç: özel karaktersiz, prefix'siz, en uzun
+                                clean_variants = [v for v in variants if
+                                    '.' not in v and '_' not in v and
+                                    not v.startswith('the') and
+                                    'official' not in v and
+                                    not v.endswith('tr')]
+                                if clean_variants:
+                                    best_variant = max(clean_variants, key=len)
+                                else:
+                                    best_variant = max(variants, key=len)
+                                venue['instagramUrl'] = f"https://instagram.com/{best_variant}"
+                                venue['instagramEstimated'] = True  # Tahmin edilen
+                                print(f"📸 Bar Instagram fallback: {venue['name']} -> {best_variant}", file=sys.stderr, flush=True)
 
                     print(f"✅ Gemini ile {len(final_venues)} Bar mekanı zenginleştirildi", file=sys.stderr, flush=True)
 
@@ -5142,12 +5182,12 @@ def generate_venues(request):
         if is_load_more_request:
             if len(cached_venues) >= 5:
                 print(f"✅ LOAD MORE CACHE HIT - {len(cached_venues)} yeni mekan cache'ten döndürülüyor!", file=sys.stderr, flush=True)
-                enriched_venues = enrich_cached_venues_with_instagram(cached_venues[:10], city)
+                enriched_venues = enrich_cached_venues_with_instagram(cached_venues[:10], city, selected_district, selected_neighborhood)
                 return Response(enriched_venues, status=status.HTTP_200_OK)
             elif len(cached_venues) > 0:
                 # 1-4 venue kaldı - bunları dön ve hasMore: false de (API aynı mekanları döndürür)
                 print(f"⚠️ LOAD MORE - Son {len(cached_venues)} mekan döndürülüyor, hasMore=false", file=sys.stderr, flush=True)
-                enriched_venues = enrich_cached_venues_with_instagram(cached_venues, city)
+                enriched_venues = enrich_cached_venues_with_instagram(cached_venues, city, selected_district, selected_neighborhood)
                 return Response({
                     'venues': enriched_venues,
                     'hasMore': False
@@ -5167,7 +5207,7 @@ def generate_venues(request):
         if len(cached_venues) >= MIN_VENUES_FOR_CACHE_ONLY and not is_load_more_request:
             print(f"✅ CACHE HIT - {len(cached_venues)} venue cache'ten döndürülüyor, API çağrısı atlandı!", file=sys.stderr, flush=True)
             # Instagram URL enrichment - cache'deki eksik Instagram URL'lerini bul
-            enriched_venues = enrich_cached_venues_with_instagram(cached_venues, city)
+            enriched_venues = enrich_cached_venues_with_instagram(cached_venues, city, selected_district, selected_neighborhood)
             # G&M venue'larını başa ekle (varsa) - duplicate önleme ile
             if gm_venues:
                 # G&M mekanlarını Gemini ile zenginleştir
@@ -6178,7 +6218,9 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                                 venue_name=place['name'],
                                 city=city,
                                 website=place.get('website'),
-                                existing_instagram=ai_data.get('instagramUrl')
+                                existing_instagram=ai_data.get('instagramUrl'),
+                                district=selected_district,
+                                neighborhood=selected_neighborhood
                             ) or '',
                             'phoneNumber': place.get('phone_number', ''),
                             'hours': place.get('hours', ''),
@@ -6244,7 +6286,9 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                             venue_name=place['name'],
                             city=city,
                             website=place.get('website'),
-                            existing_instagram=None
+                            existing_instagram=None,
+                            district=selected_district,
+                            neighborhood=selected_neighborhood
                         ) or '',
                         'phoneNumber': place.get('phone_number', ''),
                         'hours': place.get('hours', ''),

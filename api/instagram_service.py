@@ -271,41 +271,70 @@ def normalize_instagram_url(url: str) -> Optional[str]:
     return None
 
 
-def search_instagram_google(venue_name: str, city: str) -> Optional[str]:
+def search_instagram_google(venue_name: str, city: str, district: str = None, neighborhood: str = None) -> Optional[str]:
     """
     Google Custom Search API kullanarak Instagram URL'si bul.
+
+    Önce semt/mahalle ile ara (daha spesifik), sonra şehir ile ara.
     """
     if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
         # API key yoksa sessizce geç
         return None
 
-    query = f"{venue_name} {city} instagram site:instagram.com"
+    # Birden fazla sorgu dene - en spesifikten en genele
+    queries = []
 
-    try:
-        url = "https://www.googleapis.com/customsearch/v1"
-        params = {
-            'key': GOOGLE_API_KEY,
-            'cx': GOOGLE_CSE_ID,
-            'q': query,
-            'num': 3,
-        }
+    # 1. Semt/mahalle ile ara (en spesifik)
+    if neighborhood:
+        queries.append(f"{venue_name} {neighborhood} instagram")
+    if district:
+        queries.append(f"{venue_name} {district} instagram")
 
-        response = requests.get(url, params=params, timeout=5)
+    # 2. Şehir ile ara
+    queries.append(f"{venue_name} {city} instagram")
 
-        if response.status_code == 200:
-            data = response.json()
-            items = data.get('items', [])
+    # 3. Sadece mekan adı ile ara
+    queries.append(f"{venue_name} instagram")
 
-            for item in items:
-                link = item.get('link', '')
-                if 'instagram.com/' in link:
-                    normalized = normalize_instagram_url(link)
-                    if normalized:
-                        print(f"✅ INSTAGRAM - Found via Google CSE: {venue_name} -> {normalized}", file=sys.stderr, flush=True)
-                        return normalized
+    for query in queries:
+        try:
+            url = "https://www.googleapis.com/customsearch/v1"
+            params = {
+                'key': GOOGLE_API_KEY,
+                'cx': GOOGLE_CSE_ID,
+                'q': query,
+                'num': 5,
+                'siteSearch': 'instagram.com',
+                'siteSearchFilter': 'i',  # include only instagram.com
+            }
 
-    except Exception:
-        pass
+            response = requests.get(url, params=params, timeout=5)
+
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get('items', [])
+
+                for item in items:
+                    link = item.get('link', '')
+                    title = item.get('title', '').lower()
+
+                    if 'instagram.com/' in link:
+                        normalized = normalize_instagram_url(link)
+                        if normalized:
+                            # Mekan adının bir kısmı title'da geçiyor mu kontrol et
+                            venue_words = turkish_to_ascii(venue_name.lower()).split()
+                            title_ascii = turkish_to_ascii(title)
+
+                            # En az bir kelime eşleşmesi varsa kabul et
+                            match_found = any(word in title_ascii for word in venue_words if len(word) >= 3)
+
+                            if match_found or len(items) == 1:
+                                print(f"✅ INSTAGRAM - Found via Google CSE ({query}): {venue_name} -> {normalized}", file=sys.stderr, flush=True)
+                                return normalized
+
+        except Exception as e:
+            print(f"⚠️ INSTAGRAM - Google CSE error ({query}): {e}", file=sys.stderr, flush=True)
+            continue
 
     return None
 
@@ -354,7 +383,9 @@ def discover_instagram_url(
     venue_name: str,
     city: str,
     website: str = None,
-    existing_instagram: str = None
+    existing_instagram: str = None,
+    district: str = None,
+    neighborhood: str = None
 ) -> Optional[str]:
     """
     Mekanın Instagram URL'sini keşfet.
@@ -362,20 +393,22 @@ def discover_instagram_url(
     Öncelik sırası:
     1. Mevcut geçerli Instagram URL'si varsa kullan
     2. Website'ten Instagram linki bul
-    3. Mekan adından username tahmin et ve doğrula
-    4. Google Custom Search ile ara (API key varsa)
+    3. Google Custom Search ile ara (API key varsa) - semt/mahalle bilgisiyle
+    4. Mekan adından username tahmin et ve doğrula
 
     Args:
         venue_name: Mekan adı
         city: Şehir adı
         website: Mekanın web sitesi (opsiyonel)
         existing_instagram: Mevcut Instagram URL (Gemini'den gelen)
+        district: İlçe/semt adı (opsiyonel) - örn: "Konak"
+        neighborhood: Mahalle adı (opsiyonel) - örn: "Alsancak"
 
     Returns:
         Geçerli Instagram URL veya None
     """
-    # Cache key
-    cache_key = f"{venue_name.lower()}:{city.lower()}"
+    # Cache key - semt bilgisini de dahil et
+    cache_key = f"{venue_name.lower()}:{city.lower()}:{district or ''}:{neighborhood or ''}"
 
     # Cache'de var mı?
     if cache_key in _instagram_cache:
@@ -399,9 +432,9 @@ def discover_instagram_url(
     if not instagram_url and website:
         instagram_url = find_instagram_from_website(website)
 
-    # 3. Google Custom Search ile ara (API key varsa) - güvenilir sonuçlar
+    # 3. Google Custom Search ile ara (API key varsa) - semt/mahalle bilgisiyle daha iyi sonuç
     if not instagram_url and GOOGLE_API_KEY and GOOGLE_CSE_ID:
-        instagram_url = search_instagram_google(venue_name, city)
+        instagram_url = search_instagram_google(venue_name, city, district, neighborhood)
 
     # 4. Mekan adından tahmin et (şehir eklentili varyantlar - ledimancheizmir gibi)
     if not instagram_url:
