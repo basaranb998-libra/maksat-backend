@@ -5732,19 +5732,43 @@ def generate_venues(request):
         gmaps = get_gmaps_client()
         places_result = {'results': []}
 
-        # Nearby Search için uygun kategoriler (Meyhane hariç - text search daha iyi sonuç veriyor)
-        nearby_search_categories = ['İş Çıkışı Bira & Kokteyl']
+        # Tüm kategorilerde Nearby Search kullan (kesin lokasyon filtrelemesi için)
+        # Text Search location bias yeterli değil, ilçe dışı mekanlar geliyor
+        nearby_search_categories = [
+            'İlk Buluşma', 'Özel Gün', 'İş Yemeği', 'Muhabbet', 'Kafa Dinleme',
+            'Aile Yemeği', 'Meyhane', 'Balıkçı', 'Ocakbaşı', 'Kahvaltı & Brunch',
+            'İş Çıkışı Bira & Kokteyl', 'Burger & Fast', 'Pizzacı',
+            'Müze', 'Galeri', 'Beach Club', 'Plaj', 'Spor', 'Odaklanma'
+        ]
 
-        # Kategori bazlı included types (Google Places API için)
-        category_included_types = {
-            'İş Çıkışı Bira & Kokteyl': ['bar', 'pub', 'night_club'],
+        # Kategori bazlı included types ve keyword (Google Places API için)
+        category_search_config = {
+            'İlk Buluşma': {'type': 'restaurant', 'keyword': 'romantic restaurant wine bar rooftop'},
+            'Özel Gün': {'type': 'restaurant', 'keyword': 'fine dining romantic celebration rooftop'},
+            'İş Yemeği': {'type': 'restaurant', 'keyword': 'business lunch restaurant'},
+            'Muhabbet': {'type': 'restaurant', 'keyword': 'cafe bar lounge restaurant'},
+            'Kafa Dinleme': {'type': 'cafe', 'keyword': 'quiet cafe lounge peaceful'},
+            'Aile Yemeği': {'type': 'restaurant', 'keyword': 'family restaurant casual dining'},
+            'Meyhane': {'type': 'restaurant', 'keyword': 'meyhane turkish tavern meze'},
+            'Balıkçı': {'type': 'restaurant', 'keyword': 'seafood fish restaurant balık'},
+            'Ocakbaşı': {'type': 'restaurant', 'keyword': 'ocakbaşı kebab grill'},
+            'Kahvaltı & Brunch': {'type': 'restaurant', 'keyword': 'breakfast brunch kahvaltı'},
+            'İş Çıkışı Bira & Kokteyl': {'type': 'bar', 'keyword': 'bar pub cocktail'},
+            'Burger & Fast': {'type': 'restaurant', 'keyword': 'burger hamburger fast food'},
+            'Pizzacı': {'type': 'restaurant', 'keyword': 'pizza pizzeria'},
+            'Müze': {'type': 'museum', 'keyword': 'museum'},
+            'Galeri': {'type': 'art_gallery', 'keyword': 'art gallery'},
+            'Beach Club': {'type': 'restaurant', 'keyword': 'beach club'},
+            'Plaj': {'type': 'natural_feature', 'keyword': 'beach'},
+            'Spor': {'type': 'gym', 'keyword': 'gym fitness'},
+            'Odaklanma': {'type': 'cafe', 'keyword': 'coworking cafe quiet'},
         }
 
         if gmaps:
             try:
                 import requests
 
-                # İş Çıkışı Bira & Kokteyl için Nearby Search kullan (Legacy API)
+                # Tüm kategoriler için Nearby Search kullan (kesin lokasyon filtrelemesi)
                 if category['name'] in nearby_search_categories:
                     # Önce lokasyonun koordinatlarını al (geocode)
                     geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
@@ -5762,27 +5786,53 @@ def generate_venues(request):
 
                             print(f"🗺️ Nearby Search - {category['name']}: {search_location} -> ({lat}, {lng})", file=sys.stderr, flush=True)
 
-                            # Legacy Nearby Search API çağrısı
+                            # Legacy Nearby Search API çağrısı - keyword ile
                             nearby_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
-                            included_types = category_included_types.get(category['name'], ['bar', 'restaurant'])
+                            search_config = category_search_config.get(category['name'], {'type': 'restaurant', 'keyword': ''})
 
-                            # Legacy API'de tek type gönderilebilir, birden fazla için ayrı call veya textsearch
                             nearby_params = {
                                 "location": f"{lat},{lng}",
-                                "radius": 2000,  # 2km yarıçap
-                                "type": included_types[0] if included_types else "bar",
+                                "radius": 3000,  # 3km yarıçap - ilçe içinde kalması için
+                                "type": search_config['type'],
+                                "keyword": search_config['keyword'],
                                 "language": "tr",
                                 "key": settings.GOOGLE_MAPS_API_KEY
                             }
 
-                            print(f"🔍 Nearby Search type: {nearby_params['type']}", file=sys.stderr, flush=True)
+                            print(f"🔍 Nearby Search: type={nearby_params['type']}, keyword={nearby_params['keyword']}", file=sys.stderr, flush=True)
 
+                            # İlk sayfa
                             response = requests.get(nearby_url, params=nearby_params)
+                            all_results = []
 
                             if response.status_code == 200:
                                 places_data = response.json()
-                                places_result = {'results': places_data.get('results', [])}
-                                print(f"✅ Nearby Search sonuç: {len(places_result['results'])} mekan", file=sys.stderr, flush=True)
+                                all_results.extend(places_data.get('results', []))
+                                print(f"📄 Nearby Search sayfa 1: {len(places_data.get('results', []))} sonuç", file=sys.stderr, flush=True)
+
+                                # Pagination: 2. ve 3. sayfaları da al
+                                import time
+                                for page_num in range(2, 4):
+                                    next_page_token = places_data.get('next_page_token')
+                                    if not next_page_token:
+                                        break
+
+                                    time.sleep(2)  # Google API requires delay before using next_page_token
+                                    next_params = {
+                                        "pagetoken": next_page_token,
+                                        "key": settings.GOOGLE_MAPS_API_KEY
+                                    }
+                                    next_response = requests.get(nearby_url, params=next_params)
+                                    if next_response.status_code == 200:
+                                        next_data = next_response.json()
+                                        all_results.extend(next_data.get('results', []))
+                                        places_data = next_data
+                                        print(f"📄 Nearby Search sayfa {page_num}: {len(next_data.get('results', []))} sonuç", file=sys.stderr, flush=True)
+                                    else:
+                                        break
+
+                                places_result = {'results': all_results}
+                                print(f"✅ Nearby Search toplam: {len(all_results)} mekan", file=sys.stderr, flush=True)
                             else:
                                 print(f"Nearby Search API hatası: {response.status_code} - {response.text}", file=sys.stderr, flush=True)
                                 # Fallback: Text Search kullan (Legacy API) - location bias ile
@@ -5792,7 +5842,7 @@ def generate_venues(request):
                                     "language": "tr",
                                     "key": settings.GOOGLE_MAPS_API_KEY,
                                     "location": f"{lat},{lng}",
-                                    "radius": 2000  # 2km yarıçap - daha sıkı filtreleme
+                                    "radius": 3000
                                 }
                                 response = requests.get(url, params=params)
                                 if response.status_code == 200:
