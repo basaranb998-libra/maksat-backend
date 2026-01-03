@@ -3083,28 +3083,31 @@ def generate_bar_venues(location, filters, exclude_ids):
         print(f"⚠️ Geocode hatası: {e}", file=sys.stderr, flush=True)
 
     try:
+        # Koordinatlar yoksa arama yapamayız
+        if not location_lat or not location_lng:
+            print(f"⚠️ İş Çıkışı Bar: Koordinat bulunamadı, arama yapılamıyor", file=sys.stderr, flush=True)
+            return Response([], status=status.HTTP_200_OK)
+
+        # Nearby Search API - kesin lokasyon filtrelemesi
+        nearby_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+
         for query_term, bar_type in bar_queries:
             if len(all_venues) >= 15:  # Yeterli mekan bulundu
                 break
 
-            search_query = f"{query_term} {search_location}"
-            print(f"🔍 Bar Query: {search_query} (location bias: {location_lat is not None})", file=sys.stderr, flush=True)
+            print(f"🔍 Bar Nearby Search: {query_term} @ {search_location}", file=sys.stderr, flush=True)
 
-            # Google Places API Text Search (Legacy)
-            api_url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
             params = {
-                'query': search_query,
+                'location': f"{location_lat},{location_lng}",
+                'radius': 2000,  # 2km yarıçap - kesin filtreleme
+                'type': 'bar',
+                'keyword': query_term,
                 'language': 'tr',
                 'key': google_api_key
             }
 
-            # Location bias ekle (koordinatlar alındıysa)
-            if location_lat and location_lng:
-                params["location"] = f"{location_lat},{location_lng}"
-                params["radius"] = 3000  # 3km yarıçap
-
             try:
-                response = requests.get(api_url, params=params, timeout=10)
+                response = requests.get(nearby_url, params=params, timeout=10)
                 if response.status_code != 200:
                     print(f"⚠️ Bar API error for {bar_type}: {response.status_code}", file=sys.stderr, flush=True)
                     continue
@@ -3119,7 +3122,7 @@ def generate_bar_venues(location, filters, exclude_ids):
                         break
                     time.sleep(2)
                     next_params = {"pagetoken": next_page_token, "key": google_api_key}
-                    next_response = requests.get(api_url, params=next_params, timeout=10)
+                    next_response = requests.get(nearby_url, params=next_params, timeout=10)
                     if next_response.status_code == 200:
                         next_data = next_response.json()
                         places.extend(next_data.get('results', []))
@@ -3550,23 +3553,28 @@ def generate_street_food_places(location, filters, exclude_ids):
         print(f"⚠️ Geocode hatası: {e}", file=sys.stderr, flush=True)
 
     try:
+        # Koordinatlar yoksa arama yapamayız
+        if not location_lat or not location_lng:
+            print(f"⚠️ Sokak Lezzeti: Koordinat bulunamadı, arama yapılamıyor", file=sys.stderr, flush=True)
+            return Response([], status=status.HTTP_200_OK)
+
+        # Nearby Search API - kesin lokasyon filtrelemesi
+        nearby_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+
         for query_term, food_type in street_food_queries:
             try:
-                url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
                 params = {
-                    "query": f"{query_term} in {search_location}, Turkey",
+                    "location": f"{location_lat},{location_lng}",
+                    "radius": 2000,  # 2km yarıçap - kesin filtreleme
+                    "type": "restaurant",
+                    "keyword": query_term,
                     "language": "tr",
                     "key": settings.GOOGLE_MAPS_API_KEY
                 }
 
-                # Location bias ekle (koordinatlar alındıysa)
-                if location_lat and location_lng:
-                    params["location"] = f"{location_lat},{location_lng}"
-                    params["radius"] = 3000  # 3km yarıçap
+                print(f"🔍 Sokak Lezzeti Nearby Search: {query_term} @ {search_location}", file=sys.stderr, flush=True)
 
-                print(f"🔍 Sorgu: {query_term} in {search_location} (location bias: {location_lat is not None})", file=sys.stderr, flush=True)
-
-                response = requests.get(url, params=params)
+                response = requests.get(nearby_url, params=params)
 
                 if response.status_code != 200:
                     print(f"⚠️ API hatası ({query_term}): {response.status_code}", file=sys.stderr, flush=True)
@@ -3582,7 +3590,7 @@ def generate_street_food_places(location, filters, exclude_ids):
                         break
                     time.sleep(2)
                     next_params = {"pagetoken": next_page_token, "key": settings.GOOGLE_MAPS_API_KEY}
-                    next_response = requests.get(url, params=next_params)
+                    next_response = requests.get(nearby_url, params=next_params)
                     if next_response.status_code == 200:
                         next_data = next_response.json()
                         places.extend(next_data.get('results', []))
@@ -3591,7 +3599,8 @@ def generate_street_food_places(location, filters, exclude_ids):
                 for place in places:
                     place_id = place.get('place_id', '')
                     place_name = place.get('name', '')
-                    place_address = place.get('formatted_address', '')
+                    # Nearby Search'te vicinity, Text Search'te formatted_address
+                    place_address = place.get('vicinity', '') or place.get('formatted_address', '')
                     place_rating = place.get('rating', 0)
                     place_review_count = place.get('user_ratings_total', 0)
                     place_types = place.get('types', [])
@@ -4084,23 +4093,28 @@ def generate_specialty_coffee_places(location, filters, exclude_ids):
         print(f"⚠️ Geocode hatası: {e}", file=sys.stderr, flush=True)
 
     try:
+        # Koordinatlar yoksa arama yapamayız
+        if not location_lat or not location_lng:
+            print(f"⚠️ 3. Nesil Kahveci: Koordinat bulunamadı, arama yapılamıyor", file=sys.stderr, flush=True)
+            return Response([], status=status.HTTP_200_OK)
+
+        # Nearby Search API - kesin lokasyon filtrelemesi
+        nearby_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+
         for query_term, coffee_type in specialty_coffee_queries:
             try:
-                url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
                 params = {
-                    "query": f"{query_term} in {search_location}, Turkey",
+                    "location": f"{location_lat},{location_lng}",
+                    "radius": 2000,  # 2km yarıçap - kesin filtreleme
+                    "type": "cafe",
+                    "keyword": query_term,
                     "language": "tr",
                     "key": settings.GOOGLE_MAPS_API_KEY
                 }
 
-                # Location bias ekle (koordinatlar alındıysa)
-                if location_lat and location_lng:
-                    params["location"] = f"{location_lat},{location_lng}"
-                    params["radius"] = 3000  # 3km yarıçap
+                print(f"🔍 3. Nesil Kahveci Nearby Search: {query_term} @ {search_location}", file=sys.stderr, flush=True)
 
-                print(f"🔍 Sorgu: {query_term} in {search_location} (location bias: {location_lat is not None})", file=sys.stderr, flush=True)
-
-                response = requests.get(url, params=params)
+                response = requests.get(nearby_url, params=params)
 
                 if response.status_code != 200:
                     print(f"⚠️ API hatası ({query_term}): {response.status_code}", file=sys.stderr, flush=True)
@@ -4116,7 +4130,7 @@ def generate_specialty_coffee_places(location, filters, exclude_ids):
                         break
                     time.sleep(2)
                     next_params = {"pagetoken": next_page_token, "key": settings.GOOGLE_MAPS_API_KEY}
-                    next_response = requests.get(url, params=next_params)
+                    next_response = requests.get(nearby_url, params=next_params)
                     if next_response.status_code == 200:
                         next_data = next_response.json()
                         places.extend(next_data.get('results', []))
@@ -4125,7 +4139,8 @@ def generate_specialty_coffee_places(location, filters, exclude_ids):
                 for place in places:
                     place_id = place.get('place_id', '')
                     place_name = place.get('name', '')
-                    place_address = place.get('formatted_address', '')
+                    # Nearby Search'te vicinity, Text Search'te formatted_address
+                    place_address = place.get('vicinity', '') or place.get('formatted_address', '')
                     place_rating = place.get('rating', 0)
                     place_review_count = place.get('user_ratings_total', 0)
                     place_types = place.get('types', [])
@@ -4522,23 +4537,28 @@ def generate_party_venues(location, filters, exclude_ids):
         print(f"⚠️ Geocode hatası: {e}", file=sys.stderr, flush=True)
 
     try:
+        # Koordinatlar yoksa arama yapamayız
+        if not location_lat or not location_lng:
+            print(f"⚠️ Eğlence & Parti: Koordinat bulunamadı, arama yapılamıyor", file=sys.stderr, flush=True)
+            return Response([], status=status.HTTP_200_OK)
+
+        # Nearby Search API - kesin lokasyon filtrelemesi
+        nearby_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+
         for query_term, venue_type in party_queries:
             try:
-                url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
                 params = {
-                    "query": f"{query_term} in {search_location}, Turkey",
+                    "location": f"{location_lat},{location_lng}",
+                    "radius": 2000,  # 2km yarıçap - kesin filtreleme
+                    "type": "night_club",
+                    "keyword": query_term,
                     "language": "tr",
                     "key": settings.GOOGLE_MAPS_API_KEY
                 }
 
-                # Location bias ekle (koordinatlar alındıysa)
-                if location_lat and location_lng:
-                    params["location"] = f"{location_lat},{location_lng}"
-                    params["radius"] = 3000  # 3km yarıçap
+                print(f"🔍 Eğlence & Parti Nearby Search: {query_term} @ {search_location}", file=sys.stderr, flush=True)
 
-                print(f"🔍 Sorgu: {query_term} in {search_location} (location bias: {location_lat is not None})", file=sys.stderr, flush=True)
-
-                response = requests.get(url, params=params)
+                response = requests.get(nearby_url, params=params)
 
                 if response.status_code != 200:
                     print(f"⚠️ API hatası ({query_term}): {response.status_code}", file=sys.stderr, flush=True)
@@ -4554,7 +4574,7 @@ def generate_party_venues(location, filters, exclude_ids):
                         break
                     time.sleep(2)
                     next_params = {"pagetoken": next_page_token, "key": settings.GOOGLE_MAPS_API_KEY}
-                    next_response = requests.get(url, params=next_params)
+                    next_response = requests.get(nearby_url, params=next_params)
                     if next_response.status_code == 200:
                         next_data = next_response.json()
                         places.extend(next_data.get('results', []))
@@ -4563,7 +4583,8 @@ def generate_party_venues(location, filters, exclude_ids):
                 for place in places:
                     place_id = place.get('place_id', '')
                     place_name = place.get('name', '')
-                    place_address = place.get('formatted_address', '')
+                    # Nearby Search'te vicinity, Text Search'te formatted_address
+                    place_address = place.get('vicinity', '') or place.get('formatted_address', '')
                     place_rating = place.get('rating', 0)
                     place_review_count = place.get('user_ratings_total', 0)
                     place_types = place.get('types', [])
@@ -5657,7 +5678,7 @@ def generate_venues(request):
                                     "language": "tr",
                                     "key": settings.GOOGLE_MAPS_API_KEY,
                                     "location": f"{lat},{lng}",
-                                    "radius": 3000  # 3km yarıçap
+                                    "radius": 2000  # 2km yarıçap - daha sıkı filtreleme
                                 }
                                 response = requests.get(url, params=params)
                                 if response.status_code == 200:
@@ -5697,7 +5718,7 @@ def generate_venues(request):
                     # Location bias ekle (koordinatlar alındıysa)
                     if location_lat and location_lng:
                         params["location"] = f"{location_lat},{location_lng}"
-                        params["radius"] = 3000  # 3km yarıçap
+                        params["radius"] = 2000  # 2km yarıçap - daha sıkı filtreleme
 
                     print(f"DEBUG - Google Places API Query: {params['query']} (location bias: {location_lat is not None})", file=sys.stderr, flush=True)
 
@@ -6686,8 +6707,8 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
         # Gault & Millau bilgisi ekle
         combined_venues = enrich_venues_with_gault_millau(combined_venues)
 
-        # Instagram URL ekle (eksikse)
-        combined_venues = enrich_venues_with_instagram(combined_venues)
+        # Instagram URL ekle (eksikse) - Google CSE ile arama
+        combined_venues = enrich_venues_with_instagram(combined_venues, city, selected_district, selected_neighborhood)
 
         # ===== OCAKBAŞI KATEGORİSİ İÇİN MİNİMUM RATİNG FİLTRESİ =====
         # Gemini prompt'u takip etmese bile, 3.9 altındaki puanlı mekanları filtrele
