@@ -522,11 +522,17 @@ def discover_instagram_url(
 
     # 1. Google Custom Search ile ara - EN GÜVENİLİR YÖNTEM
     # "baristocrat istanbul" araması -> "baristocrat3rd" bulur
+    print(f"🔍 INSTAGRAM - CSE check: API_KEY={'YES' if GOOGLE_API_KEY else 'NO'}, CSE_ID={'YES' if GOOGLE_CSE_ID else 'NO'}", file=sys.stderr, flush=True)
     if GOOGLE_API_KEY and GOOGLE_CSE_ID:
+        print(f"🔍 INSTAGRAM - CSE araması başlıyor: {venue_name}", file=sys.stderr, flush=True)
         instagram_url = search_instagram_google(venue_name, city, district, neighborhood)
         if instagram_url:
             is_verified = True
             print(f"✅ INSTAGRAM - Verified via Google Search: {venue_name} -> {instagram_url}", file=sys.stderr, flush=True)
+        else:
+            print(f"⚠️ INSTAGRAM - CSE sonuç bulamadı: {venue_name}", file=sys.stderr, flush=True)
+    else:
+        print(f"❌ INSTAGRAM - CSE devre dışı (API key veya CSE ID eksik)", file=sys.stderr, flush=True)
 
     # 2. Website'ten Instagram linki bul
     if not instagram_url and website:
