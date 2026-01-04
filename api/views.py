@@ -3454,14 +3454,18 @@ SADECE JSON array döndür, başka açıklama ekleme. [{{}}, {{}}, ...]"""
 
                     # ===== HYBRID: CACHE + API BİRLEŞTİR =====
                     combined_venues = []
+                    existing_names = set()  # İsim bazlı duplicate kontrolü
                     for cv in cached_venues:
                         if len(combined_venues) < 50:
                             combined_venues.append(cv)
+                            existing_names.add(cv.get('name', '').lower().strip())
                     existing_ids = {v.get('id') for v in combined_venues}
                     for av in final_venues:
-                        if len(combined_venues) < 50 and av.get('id') not in existing_ids:
+                        av_name = av.get('name', '').lower().strip()
+                        if len(combined_venues) < 50 and av.get('id') not in existing_ids and av_name not in existing_names:
                             combined_venues.append(av)
                             existing_ids.add(av.get('id'))
+                            existing_names.add(av_name)
 
                     print(f"🔀 HYBRID RESULT - Bar Cache: {len(cached_venues)}, API: {len(final_venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
                     return Response(combined_venues, status=status.HTTP_200_OK)
@@ -3492,14 +3496,18 @@ SADECE JSON array döndür, başka açıklama ekleme. [{{}}, {{}}, ...]"""
 
         # ===== HYBRID: CACHE + API =====
         combined_venues = []
+        existing_names = set()  # İsim bazlı duplicate kontrolü
         for cv in cached_venues:
             if len(combined_venues) < 50:
                 combined_venues.append(cv)
+                existing_names.add(cv.get('name', '').lower().strip())
         existing_ids = {v.get('id') for v in combined_venues}
         for av in venues:
-            if len(combined_venues) < 50 and av.get('id') not in existing_ids:
+            av_name = av.get('name', '').lower().strip()
+            if len(combined_venues) < 50 and av.get('id') not in existing_ids and av_name not in existing_names:
                 combined_venues.append(av)
                 existing_ids.add(av.get('id'))
+                existing_names.add(av_name)
 
         print(f"🔀 HYBRID RESULT - Bar Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
         return Response(combined_venues, status=status.HTTP_200_OK)
@@ -4044,24 +4052,30 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
         # ===== HYBRID: G&M + CACHE + API VENUE'LARINI BİRLEŞTİR =====
         combined_venues = []
         existing_ids = set()
+        existing_names = set()  # İsim bazlı duplicate kontrolü
 
         # 1. Önce G&M venue'larını ekle (en yüksek öncelik)
         for gv in gm_venues:
             if len(combined_venues) < 50:
                 combined_venues.append(gv)
                 existing_ids.add(gv.get('id'))
+                existing_names.add(gv.get('name', '').lower().strip())
 
-        # 2. Sonra cache'ten gelenleri ekle
+        # 2. Sonra cache'ten gelenleri ekle (ID ve isim bazlı duplicate kontrolü)
         for cv in cached_venues:
-            if len(combined_venues) < 50 and cv.get('id') not in existing_ids:
+            cv_name = cv.get('name', '').lower().strip()
+            if len(combined_venues) < 50 and cv.get('id') not in existing_ids and cv_name not in existing_names:
                 combined_venues.append(cv)
                 existing_ids.add(cv.get('id'))
+                existing_names.add(cv_name)
 
-        # 3. Son olarak API'den gelenleri ekle (duplicate olmayanları)
+        # 3. Son olarak API'den gelenleri ekle (ID ve isim bazlı duplicate kontrolü)
         for av in venues:
-            if len(combined_venues) < 50 and av.get('id') not in existing_ids:
+            av_name = av.get('name', '').lower().strip()
+            if len(combined_venues) < 50 and av.get('id') not in existing_ids and av_name not in existing_names:
                 combined_venues.append(av)
                 existing_ids.add(av.get('id'))
+                existing_names.add(av_name)
 
         print(f"🔀 HYBRID RESULT - Sokak Lezzeti G&M: {len(gm_venues)}, Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
         return Response(combined_venues, status=status.HTTP_200_OK)
@@ -4447,24 +4461,30 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
         # ===== HYBRID: G&M + CACHE + API VENUE'LARINI BİRLEŞTİR =====
         combined_venues = []
         existing_ids = set()
+        existing_names = set()  # İsim bazlı duplicate kontrolü
 
         # 1. Önce G&M venue'larını ekle
         for gv in gm_venues:
             if len(combined_venues) < 50:
                 combined_venues.append(gv)
                 existing_ids.add(gv.get('id'))
+                existing_names.add(gv.get('name', '').lower().strip())
 
-        # 2. Sonra cache'ten gelenleri ekle
+        # 2. Sonra cache'ten gelenleri ekle (ID ve isim bazlı duplicate kontrolü)
         for cv in cached_venues:
-            if len(combined_venues) < 50 and cv.get('id') not in existing_ids:
+            cv_name = cv.get('name', '').lower().strip()
+            if len(combined_venues) < 50 and cv.get('id') not in existing_ids and cv_name not in existing_names:
                 combined_venues.append(cv)
                 existing_ids.add(cv.get('id'))
+                existing_names.add(cv_name)
 
-        # 3. Son olarak API'den gelenleri ekle
+        # 3. Son olarak API'den gelenleri ekle (ID ve isim bazlı duplicate kontrolü)
         for av in venues:
-            if len(combined_venues) < 50 and av.get('id') not in existing_ids:
+            av_name = av.get('name', '').lower().strip()
+            if len(combined_venues) < 50 and av.get('id') not in existing_ids and av_name not in existing_names:
                 combined_venues.append(av)
                 existing_ids.add(av.get('id'))
+                existing_names.add(av_name)
 
         print(f"🔀 HYBRID RESULT - 3. Nesil Kahveci G&M: {len(gm_venues)}, Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
         return Response(combined_venues, status=status.HTTP_200_OK)
@@ -5085,14 +5105,18 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
                     # ===== HYBRID: CACHE + API VENUE'LARINI BİRLEŞTİR =====
                     combined_venues = []
+                    existing_names = set()  # İsim bazlı duplicate kontrolü
                     for cv in cached_venues:
                         if len(combined_venues) < 50:
                             combined_venues.append(cv)
+                            existing_names.add(cv.get('name', '').lower().strip())
                     existing_ids = {v.get('id') for v in combined_venues}
                     for av in final_venues:
-                        if len(combined_venues) < 50 and av.get('id') not in existing_ids:
+                        av_name = av.get('name', '').lower().strip()
+                        if len(combined_venues) < 50 and av.get('id') not in existing_ids and av_name not in existing_names:
                             combined_venues.append(av)
                             existing_ids.add(av.get('id'))
+                            existing_names.add(av_name)
 
                     print(f"🔀 HYBRID RESULT - Eğlence & Parti Cache: {len(cached_venues)}, API: {len(final_venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
                     return Response(combined_venues, status=status.HTTP_200_OK)
@@ -5125,14 +5149,18 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
         # ===== HYBRID: CACHE + API VENUE'LARINI BİRLEŞTİR =====
         combined_venues = []
+        existing_names = set()  # İsim bazlı duplicate kontrolü
         for cv in cached_venues:
             if len(combined_venues) < 50:
                 combined_venues.append(cv)
+                existing_names.add(cv.get('name', '').lower().strip())
         existing_ids = {v.get('id') for v in combined_venues}
         for av in venues:
-            if len(combined_venues) < 50 and av.get('id') not in existing_ids:
+            av_name = av.get('name', '').lower().strip()
+            if len(combined_venues) < 50 and av.get('id') not in existing_ids and av_name not in existing_names:
                 combined_venues.append(av)
                 existing_ids.add(av.get('id'))
+                existing_names.add(av_name)
 
         print(f"🔀 HYBRID RESULT - Eğlence & Parti (Fallback) Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
         return Response(combined_venues, status=status.HTTP_200_OK)
@@ -6842,16 +6870,20 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
             print(f"🔄 LOAD MORE RESULT - API'den {len(combined_venues)} yeni mekan döndürülüyor", file=sys.stderr, flush=True)
         else:
             # NORMAL: Önce cache'ten gelenleri ekle
+            existing_names = set()  # İsim bazlı duplicate kontrolü
             for cv in cached_venues:
                 if len(combined_venues) < 50:
                     combined_venues.append(cv)
+                    existing_names.add(cv.get('name', '').lower().strip())
 
-            # Sonra API'den gelenleri ekle (tekrar olmaması için ID kontrolü yap)
+            # Sonra API'den gelenleri ekle (ID ve isim bazlı duplicate kontrolü)
             existing_ids = {v.get('id') for v in combined_venues}
             for av in venues:
-                if len(combined_venues) < 50 and av.get('id') not in existing_ids:
+                av_name = av.get('name', '').lower().strip()
+                if len(combined_venues) < 50 and av.get('id') not in existing_ids and av_name not in existing_names:
                     combined_venues.append(av)
                     existing_ids.add(av.get('id'))
+                    existing_names.add(av_name)
 
             print(f"🔀 HYBRID RESULT - Cache: {len(cached_venues)}, API: {len(venues)}, Combined: {len(combined_venues)}", file=sys.stderr, flush=True)
 
@@ -6868,10 +6900,11 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                     gv['michelinStars'] = michelin_check.get('stars', 0)
                     gv['isBibGourmand'] = michelin_check.get('isBib', False)
 
-            # G&M venue ID'lerini al
+            # G&M venue ID ve isimlerini al
             gm_ids = {v.get('id') for v in enriched_gm if v.get('id')}
-            # combined_venues'dan G&M ID'lerini çıkar (duplicate önleme)
-            combined_venues = [v for v in combined_venues if v.get('id') not in gm_ids]
+            gm_names = {v.get('name', '').lower().strip() for v in enriched_gm}
+            # combined_venues'dan G&M ID ve isimlerini çıkar (duplicate önleme)
+            combined_venues = [v for v in combined_venues if v.get('id') not in gm_ids and v.get('name', '').lower().strip() not in gm_names]
 
             # Michelin > G&M sıralaması
             def michelin_gm_sort_key(venue):
