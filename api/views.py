@@ -1921,6 +1921,7 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
 
         # Tüm venue'ları tek listede topla
         all_venues = []
+        added_venue_names = set()  # İsim bazlı duplicate kontrolü için
 
         # G&M restoranları
         enriched_gm = []
@@ -1935,18 +1936,23 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                     gv['michelinStars'] = michelin_check.get('stars', 0)
                     gv['isBibGourmand'] = michelin_check.get('isBib', False)
                 all_venues.append(gv)
+                added_venue_names.add(gv.get('name', '').lower().strip())
 
-        # Cache'deki mekanlar
+        # Cache'deki mekanlar - isim ve ID bazlı duplicate kontrolü
         for cv in cached_venues:
-            if cv.get('id') not in {v.get('id') for v in all_venues}:
+            cv_name = cv.get('name', '').lower().strip()
+            if cv.get('id') not in {v.get('id') for v in all_venues} and cv_name not in added_venue_names:
                 cv['_source'] = 'cache'
                 all_venues.append(cv)
+                added_venue_names.add(cv_name)
 
-        # API'den gelen mekanlar
+        # API'den gelen mekanlar - isim ve ID bazlı duplicate kontrolü
         for av in venues:
-            if av.get('id') not in {v.get('id') for v in all_venues}:
+            av_name = av.get('name', '').lower().strip()
+            if av.get('id') not in {v.get('id') for v in all_venues} and av_name not in added_venue_names:
                 av['_source'] = 'api'
                 all_venues.append(av)
+                added_venue_names.add(av_name)
 
         # Sıralama: Michelin > G&M > Diğerleri
         def fine_dining_sort_key(venue):
