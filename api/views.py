@@ -3444,8 +3444,8 @@ SADECE JSON array döndür, başka açıklama ekleme. [{{}}, {{}}, ...]"""
                             if instagram_url:
                                 venue['instagramUrl'] = instagram_url
                                 venue['instagramEstimated'] = not is_verified
-                                status = "verified" if is_verified else "estimated"
-                                print(f"📸 Bar Instagram ({status}): {venue['name']} -> {instagram_url}", file=sys.stderr, flush=True)
+                                insta_status = "verified" if is_verified else "estimated"
+                                print(f"📸 Bar Instagram ({insta_status}): {venue['name']} -> {instagram_url}", file=sys.stderr, flush=True)
 
                     print(f"✅ Gemini ile {len(final_venues)} Bar mekanı zenginleştirildi", file=sys.stderr, flush=True)
 
@@ -3979,8 +3979,8 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                             if instagram_url:
                                 venue['instagramUrl'] = instagram_url
                                 venue['instagramEstimated'] = not is_verified
-                                status = "verified" if is_verified else "estimated"
-                                print(f"📸 Sokak Lezzeti Instagram ({status}): {venue['name']} -> {instagram_url}", file=sys.stderr, flush=True)
+                                insta_status = "verified" if is_verified else "estimated"
+                                print(f"📸 Sokak Lezzeti Instagram ({insta_status}): {venue['name']} -> {instagram_url}", file=sys.stderr, flush=True)
 
                     print(f"✅ Gemini ile {len(final_venues)} Sokak Lezzeti mekan zenginleştirildi", file=sys.stderr, flush=True)
 
@@ -5103,8 +5103,8 @@ SADECE JSON ARRAY döndür, başka açıklama yazma."""
                             if instagram_url:
                                 venue['instagramUrl'] = instagram_url
                                 venue['instagramEstimated'] = not is_verified
-                                status = "verified" if is_verified else "estimated"
-                                print(f"📸 Eğlence & Parti Instagram ({status}): {venue['name']} -> {instagram_url}", file=sys.stderr, flush=True)
+                                insta_status = "verified" if is_verified else "estimated"
+                                print(f"📸 Eğlence & Parti Instagram ({insta_status}): {venue['name']} -> {instagram_url}", file=sys.stderr, flush=True)
 
                     print(f"✅ Gemini ile {len(final_venues)} Eğlence & Parti mekan zenginleştirildi", file=sys.stderr, flush=True)
 
