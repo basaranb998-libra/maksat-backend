@@ -1592,21 +1592,8 @@ def generate_fine_dining_with_michelin(location, filters, exclude_ids=None):
                                 if place_name_lower in added_names:
                                     continue
 
-                                if districts:
-                                    address_lower = place_address.lower()
-                                    address_normalized = address_lower.replace('ı', 'i').replace('ş', 's').replace('ğ', 'g').replace('ü', 'u').replace('ö', 'o').replace('ç', 'c')
-
-                                    district_match = False
-                                    for d in districts:
-                                        d_lower = d.lower()
-                                        d_normalized = d_lower.replace('ı', 'i').replace('ş', 's').replace('ğ', 'g').replace('ü', 'u').replace('ö', 'o').replace('ç', 'c')
-                                        if d_lower in address_lower or d_normalized in address_normalized:
-                                            district_match = True
-                                            break
-
-                                    if not district_match:
-                                        print(f"❌ Fine Dining İLÇE REJECT - {place_name}: seçilen ilçelerde değil", file=sys.stderr, flush=True)
-                                        continue
+                                # NOT: İlçe kontrolü kaldırıldı - Nearby Search zaten koordinat + radius bazlı
+                                # vicinity alanı ilçe adını içermiyor (sadece mahalle/sokak)
 
                                 if place_rating < 4.2:
                                     continue
@@ -3681,16 +3668,8 @@ def generate_street_food_places(location, filters, exclude_ids):
                         print(f"❌ REVIEW COUNT REJECT - {place_name}: {place_review_count} < 20", file=sys.stderr, flush=True)
                         continue
 
-                    # İlçe kontrolü
-                    if selected_district:
-                        address_lower = place_address.lower()
-                        district_lower = selected_district.lower()
-                        district_normalized = district_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
-                        address_normalized = address_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
-
-                        if district_lower not in address_lower and district_normalized not in address_normalized:
-                            print(f"❌ İLÇE REJECT - {place_name}: {selected_district} içermiyor", file=sys.stderr, flush=True)
-                            continue
+                    # NOT: İlçe kontrolü kaldırıldı - Nearby Search zaten koordinat + radius bazlı
+                    # vicinity alanı ilçe adını içermiyor (sadece mahalle/sokak), bu yüzden kontrol yapılmıyor
 
                     # Tekel/Market filtresi
                     place_name_lower = place_name.lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
@@ -4253,16 +4232,8 @@ def generate_specialty_coffee_places(location, filters, exclude_ids):
                         print(f"❌ REVIEW COUNT REJECT - {place_name}: {place_review_count} < 10", file=sys.stderr, flush=True)
                         continue
 
-                    # İlçe kontrolü
-                    if selected_district:
-                        address_lower = place_address.lower()
-                        district_lower = selected_district.lower()
-                        district_normalized = district_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
-                        address_normalized = address_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
-
-                        if district_lower not in address_lower and district_normalized not in address_normalized:
-                            print(f"❌ İLÇE REJECT - {place_name}: {selected_district} içermiyor", file=sys.stderr, flush=True)
-                            continue
+                    # NOT: İlçe kontrolü kaldırıldı - Nearby Search zaten koordinat + radius bazlı
+                    # vicinity alanı ilçe adını içermiyor (sadece mahalle/sokak)
 
                     # Starbucks, zincir kahveciler filtresi - bunları dahil etme
                     place_name_lower = place_name.lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
@@ -4689,20 +4660,8 @@ def generate_party_venues(location, filters, exclude_ids):
 
                     # Yorum kontrolü şimdilik atlıyoruz - yorumlar daha sonra alınacak
 
-                    # İlçe kontrolü
-                    if selected_district:
-                        address_lower = place_address.lower()
-                        district_lower = selected_district.lower()
-                        district_normalized = district_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
-                        address_normalized = address_lower.replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
-
-                        # Alaçatı için özel kontrol (Çeşme içinde)
-                        is_alacati = 'alaçatı' in address_lower or 'alacati' in address_normalized
-                        is_in_district = district_lower in address_lower or district_normalized in address_normalized
-
-                        if not is_in_district and not (selected_district.lower() == 'çeşme' and is_alacati):
-                            print(f"❌ İLÇE REJECT - {place_name}: {selected_district} içermiyor", file=sys.stderr, flush=True)
-                            continue
+                    # NOT: İlçe kontrolü kaldırıldı - Nearby Search zaten koordinat + radius bazlı
+                    # vicinity alanı ilçe adını içermiyor (sadece mahalle/sokak)
 
                     # Pavyon/konsomatris filtresi
                     place_name_lower = place_name.lower().replace('ı', 'i').replace('ş', 's').replace('ç', 'c').replace('ğ', 'g').replace('ö', 'o').replace('ü', 'u')
@@ -5749,6 +5708,7 @@ def generate_venues(request):
         # Google Places API'den mekan ara
         gmaps = get_gmaps_client()
         places_result = {'results': []}
+        is_nearby_search = False  # Nearby Search kullanıldığında True olacak - ilçe kontrolü atlanacak
 
         # Tüm kategorilerde Nearby Search kullan (kesin lokasyon filtrelemesi için)
         # Text Search location bias yeterli değil, ilçe dışı mekanlar geliyor
@@ -5850,7 +5810,28 @@ def generate_venues(request):
                                         break
 
                                 places_result = {'results': all_results}
+                                is_nearby_search = True  # Nearby Search kullanıldı - ilçe kontrolü atlanacak
                                 print(f"✅ Nearby Search toplam: {len(all_results)} mekan", file=sys.stderr, flush=True)
+
+                                # Nearby Search 0 sonuç döndürdüyse Text Search fallback yap
+                                if len(all_results) == 0:
+                                    print(f"⚠️ Nearby Search 0 sonuç, Text Search fallback yapılıyor...", file=sys.stderr, flush=True)
+                                    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+                                    params = {
+                                        "query": f"{search_query} in {search_location}, Turkey",
+                                        "language": "tr",
+                                        "key": settings.GOOGLE_MAPS_API_KEY,
+                                        "location": f"{lat},{lng}",
+                                        "radius": 5000  # 5km - daha geniş arama
+                                    }
+                                    fallback_response = requests.get(url, params=params)
+                                    if fallback_response.status_code == 200:
+                                        fallback_data = fallback_response.json()
+                                        places_result = {'results': fallback_data.get('results', [])}
+                                        is_nearby_search = False  # Text Search kullanıldı - ilçe kontrolü yapılacak
+                                        print(f"✅ Text Search fallback: {len(fallback_data.get('results', []))} sonuç", file=sys.stderr, flush=True)
+                                    else:
+                                        print(f"❌ Text Search fallback hatası: {fallback_response.status_code}", file=sys.stderr, flush=True)
                             else:
                                 print(f"Nearby Search API hatası: {response.status_code} - {response.text}", file=sys.stderr, flush=True)
                                 # Fallback: Text Search kullan (Legacy API) - location bias ile
@@ -5958,7 +5939,8 @@ def generate_venues(request):
         for idx, place in enumerate(places_result.get('results', [])[:50]):
             place_id = place.get('place_id', f"place_{idx}")
             place_name = place.get('name', '')
-            place_address = place.get('formatted_address', '')
+            # Nearby Search'te formatted_address yok, vicinity var - her ikisini de kontrol et
+            place_address = place.get('formatted_address', '') or place.get('vicinity', '')
             place_rating = place.get('rating', 0)
             place_review_count = place.get('user_ratings_total', 0)
             place_types = place.get('types', [])
@@ -5970,7 +5952,9 @@ def generate_venues(request):
                 continue
 
             # ===== İLÇE FİLTRESİ: Seçilen ilçeye ait olmayan mekanları atla =====
-            if selected_district:
+            # NOT: Nearby Search zaten koordinat + radius bazlı, ilçe kontrolü atlanıyor
+            # Çünkü vicinity alanı ilçe adını içermiyor (sadece mahalle/sokak)
+            if selected_district and not is_nearby_search:
                 # Adres içinde ilçe adı var mı kontrol et (büyük/küçük harf duyarsız)
                 address_lower = place_address.lower()
                 district_lower = selected_district.lower()
